@@ -19,8 +19,8 @@
       /* exported handleSignoutClick */
 
       // TODO: paste these from Google Cloud Console
-      const CLIENT_ID = "15768027919-fs339ovijr4ueh0hkn77974bmbq8d9m1.apps.googleusercontent.com";
-      const API_KEY = "AIzaSyCxjOFISZK_OMVHN22OSdLf5CaLAeC9yDk";
+      const CLIENT_ID = "PASTE_YOUR_OAUTH_CLIENT_ID_HERE";
+      const API_KEY = "PASTE_YOUR_API_KEY_HERE";
 
       // Drive API discovery doc
       const DISCOVERY_DOC = "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest";
@@ -81,4 +81,46 @@
       }
 
       function maybeEnableButtons() {
-        if (gapiI
+        if (gapiInited && gisInited) {
+          document.getElementById("authorize_button").style.visibility = "visible";
+        }
+      }
+
+      function handleAuthClick() {
+        tokenClient.callback = async (resp) => {
+          if (resp.error !== undefined) {
+            throw resp;
+          }
+          document.getElementById("signout_button").style.visibility = "visible";
+          document.getElementById("authorize_button").textContent = "Re-authorize";
+          document.getElementById("content").textContent = "";
+          await listAppDataFiles();
+        };
+
+        // Prompt for consent the first time; silent refresh after
+        if (gapi.client.getToken() === null) {
+          tokenClient.requestAccessToken({ prompt: "consent" });
+        } else {
+          tokenClient.requestAccessToken({ prompt: "" });
+        }
+      }
+
+      function handleSignoutClick() {
+        const token = gapi.client.getToken();
+        if (token !== null) {
+          google.accounts.oauth2.revoke(token.access_token);
+          gapi.client.setToken("");
+          document.getElementById("content").textContent = "";
+          document.getElementById("authorize_button").textContent = "Authorize";
+          document.getElementById("signout_button").style.visibility = "hidden";
+        }
+      }
+    </script>
+
+    <!-- Google API client library -->
+    <script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
+
+    <!-- Google Identity Services -->
+    <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
+  </body>
+</html>
