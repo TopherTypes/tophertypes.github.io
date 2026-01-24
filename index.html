@@ -10,6 +10,11 @@
     <button id="authorize_button" onclick="handleAuthClick()">Authorize</button>
     <button id="signout_button" onclick="handleSignoutClick()">Sign Out</button>
 
+    <button onclick="initNotes()">Init notes.json</button>
+<button onclick="loadNotes()">Load notes.json</button>
+<button onclick="saveNotes()">Save notes.json (test write)</button>
+
+
     <pre id="content" style="white-space: pre-wrap;"></pre>
 
     <script>
@@ -117,6 +122,131 @@
       }
     </script>
 
+    <script>
+  const NOTES_FILENAME = "meeting-notes.v1.json";
+
+  async function findNotesFileId() {
+    const res = await gapi.client.drive.files.list({
+      spaces: "appDataFolder",
+      q: `name='${NOTES_FILENAME.replace(/'/g, "\\'")}' and trashed=false`,
+      fields: "files(id, name, modifiedTime)",
+      pageSize: 10
+    });
+    const files = res.result.files || [];
+    return files.length ? files[0].id : null;
+  }
+
+  async function createNotesFile(initialJson) {
+    // Create file metadata in appDataFolder
+    const metadata = {
+      name: NOTES_FILENAME,
+      parents: ["appDataFolder"],
+      mimeType: "application/json"
+    };
+
+    const boundary = "-------314159265358979323846";
+    const delimiter = "\r\n--" + boundary + "\r\n";
+    const closeDelim = "\r\n--" + boundary + "--";
+
+    const multipartRequestBody =
+      delimiter +
+      "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
+      JSON.stringify(metadata) +
+      delimiter +
+      "Content-Type: application/json\r\n\r\n" +
+      JSON.stringify(initialJson) +
+      closeDelim;
+
+    const res = await gapi.client.request({
+      path: "/upload/drive/v3/files?uploadType=multipart&fields=id,name,modifiedTime",
+      method: "POST",
+      headers: { "Content-Type": 'multipart/related; boundary="' + boundary + '"' },
+      body: multipartRequestBody
+    });
+
+    return res.result.id;
+  }
+
+  async function downloadNotesJson(fileId) {
+    const res = await gapi.client.request({
+      path: `/drive/v3/files/${fileId}`,
+      method: "GET",
+      params: { alt: "media" }
+    });
+    // gapi returns parsed JSON if response is JSON, otherwise text
+    return res.body ? JSON.parse(res.body) : res.result;
+  }
+
+  async function uploadNotesJson(fileId, jsonObj) {
+    const res = await gapi.client.request({
+      path: `/upload/drive/v3/files/${fileId}`,
+      method: "PATCH",
+      params: { uploadType: "media" },
+      headers: { "Content-Type": "application/json; charset=UTF-8" },
+      body: JSON.stringify(jsonObj)
+    });
+    return res;
+  }
+
+  async function ensureNotesFile() {
+    let fileId = await findNotesFileId();
+    if (!fileId) {
+      append("notes file not found; creating in appDataFolder...");
+      const initial = makeEmptyDb();
+      fileId = await createNotesFile(initial);
+      append(`created ${NOTES_FILENAME} (id=${fileId})`);
+    } else {
+      append(`found ${NOTES_FILENAME} (id=${fileId})`);
+    }
+    return fileId;
+  }
+
+  function makeEmptyDb() {
+    return {
+      schemaVersion: 1,
+      updatedAt: new Date().toISOString(),
+      people: [],
+      groups: [],
+      topics: [],
+      meetings: [],
+      items: []
+    };
+  }
+</script>
+
+    <script>
+  let notesFileId = null;
+  let cachedDb = null;
+
+  async function initNotes() {
+    document.getElementById("content").textContent = "";
+    notesFileId = await ensureNotesFile();
+  }
+
+  async function loadNotes() {
+    document.getElementById("content").textContent = "";
+    notesFileId = notesFileId || (await ensureNotesFile());
+    cachedDb = await downloadNotesJson(notesFileId);
+    append("Loaded DB:");
+    append(JSON.stringify(cachedDb, null, 2));
+  }
+
+  async function saveNotes() {
+    document.getElementById("content").textContent = "";
+    notesFileId = notesFileId || (await ensureNotesFile());
+    cachedDb = cachedDb || makeEmptyDb();
+
+    // test write: update timestamp + write a tiny marker record
+    cachedDb.updatedAt = new Date().toISOString();
+    cachedDb._lastTestWrite = cachedDb.updatedAt;
+
+    await uploadNotesJson(notesFileId, cachedDb);
+    append("Saved DB to Drive (appDataFolder). Now reload to confirm.");
+  }
+</script>
+
+
+
     <!-- Google API client library -->
     <script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
 
@@ -124,4 +254,5 @@
     <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
   </body>
 </html>
+
 
