@@ -31,6 +31,7 @@ let syncInProgress = false;
 let hasUnsyncedChanges = false;
 let lastSyncAt = null;
 let lastRemoteModifiedTime = null;
+const itemEditState = new Map();
 
 /* ================================
    UTIL
@@ -1028,6 +1029,24 @@ function renderItemCard(it) {
   const meeting = getMeeting(it.meetingId);
   const topic = getTopic(it.topicId);
   const owner = it.ownerId ? getPerson(it.ownerId) : null;
+  const editState = itemEditState.get(it.id);
+  const isEditing = !!editState;
+  const tpl = meeting ? getTemplate(meeting.templateId) : null;
+  const secDef = (tpl?.sections || []).find(s => s.key === it.section);
+  const requires = new Set(secDef?.requires || []);
+  const ownerRequired = requires.has("ownerId");
+  const statusRequired = requires.has("status");
+
+  const people = alive(db.people).sort((a,b)=>a.name.localeCompare(b.name));
+
+  const draft = editState?.draft || {
+    text: it.text || "",
+    status: it.status || "",
+    dueDate: it.dueDate || "",
+    link: it.link || "",
+    ownerId: it.ownerId || "",
+  };
+  const editError = editState?.error || "";
 
   const status = it.status || "";
   const statusBadge = status
@@ -1043,6 +1062,71 @@ function renderItemCard(it) {
     : "";
 
   const linkBadge = it.link ? `<span class="badge badge--accent">Link</span>` : "";
+
+  if (isEditing) {
+    return `
+      <div class="item item--editing" data-item="${escapeHtml(it.id)}" data-editing="true">
+        <div class="item__top">
+          <div class="badges">
+            <span class="badge badge--accent">${escapeHtml(it.section)}</span>
+            ${status ? `<span class="badge ${statusBadge}">${escapeHtml(status.replace("_"," "))}</span>` : ""}
+            ${it.dueDate ? `<span class="badge">${escapeHtml(it.dueDate)}</span>` : ""}
+            ${updBadge}
+            ${linkBadge}
+          </div>
+          <div class="muted">${meeting ? fmtDateTime(meeting.datetime) : ""}</div>
+        </div>
+
+        <div class="item__edit">
+          <div class="formrow">
+            <label>Text</label>
+            <textarea data-edit-field="text" placeholder="Update text…">${escapeHtml(draft.text)}</textarea>
+          </div>
+
+          <div class="grid2">
+            <div class="formrow">
+              <label>Owner ${ownerRequired ? "(required)" : "(optional)"}</label>
+              <select data-edit-field="ownerId">
+                <option value="">— None —</option>
+                ${people.map(p => `
+                  <option value="${escapeHtml(p.id)}"${draft.ownerId === p.id ? " selected" : ""}>${escapeHtml(p.name)}</option>
+                `).join("")}
+              </select>
+            </div>
+
+            <div class="formrow">
+              <label>Status ${statusRequired ? "(required)" : "(optional)"}</label>
+              <select data-edit-field="status">
+                <option value="">— None —</option>
+                <option value="open"${draft.status === "open" ? " selected" : ""}>Open</option>
+                <option value="in_progress"${draft.status === "in_progress" ? " selected" : ""}>In progress</option>
+                <option value="blocked"${draft.status === "blocked" ? " selected" : ""}>Blocked</option>
+                <option value="done"${draft.status === "done" ? " selected" : ""}>Done</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid2">
+            <div class="formrow">
+              <label>Due date (optional)</label>
+              <input data-edit-field="dueDate" type="date" value="${escapeHtml(draft.dueDate)}" />
+            </div>
+
+            <div class="formrow">
+              <label>Link (optional)</label>
+              <input data-edit-field="link" type="url" placeholder="https://…" value="${escapeHtml(draft.link)}" />
+            </div>
+          </div>
+          ${editError ? `<div class="item__error">${escapeHtml(editError)}</div>` : ""}
+        </div>
+
+        <div class="item__actions">
+          <button class="smallbtn" data-save-item="${escapeHtml(it.id)}">Save</button>
+          <button class="smallbtn" data-cancel-item="${escapeHtml(it.id)}">Cancel</button>
+        </div>
+      </div>
+    `;
+  }
 
   return `
     <div class="item" data-item="${escapeHtml(it.id)}">
@@ -1077,24 +1161,84 @@ function renderItemCard(it) {
 
 function wireItemButtons(rootEl) {
   rootEl.querySelectorAll("[data-edit-item]").forEach(btn => {
-    btn.addEventListener("click", async () => {
+    btn.addEventListener("click", () => {
       const id = btn.getAttribute("data-edit-item");
       const it = getItem(id);
       if (!it) return;
+      itemEditState.set(id, {
+        draft: {
+          text: it.text || "",
+          status: it.status || "",
+          dueDate: it.dueDate || "",
+          link: it.link || "",
+          ownerId: it.ownerId || "",
+        },
+        error: "",
+      });
+      renderAll();
+    });
+  });
 
-      const text = promptNonEmpty("Edit text:", it.text) ?? it.text;
-      const status = prompt("Status (open/in_progress/blocked/done or blank):", it.status || "") ?? (it.status || "");
-      const dueDate = prompt("Due date (YYYY-MM-DD or blank):", it.dueDate || "") ?? (it.dueDate || "");
-      const link = prompt("Link (or blank):", it.link || "") ?? (it.link || "");
+  rootEl.querySelectorAll("[data-save-item]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const id = btn.getAttribute("data-save-item");
+      const it = getItem(id);
+      if (!it) return;
+      const card = btn.closest(".item");
+      if (!card) return;
+
+      const text = card.querySelector("[data-edit-field=text]")?.value.trim() || "";
+      const ownerId = card.querySelector("[data-edit-field=ownerId]")?.value || null;
+      const status = card.querySelector("[data-edit-field=status]")?.value || null;
+      const dueDate = card.querySelector("[data-edit-field=dueDate]")?.value || null;
+      const link = card.querySelector("[data-edit-field=link]")?.value.trim() || null;
+
+      const meeting = getMeeting(it.meetingId);
+      const tpl = meeting ? getTemplate(meeting.templateId) : null;
+      const secDef = (tpl?.sections || []).find(s => s.key === it.section);
+      const req = new Set(secDef?.requires || []);
+      const errs = [];
+
+      if (!text) errs.push("Text is required.");
+      if (req.has("ownerId") && !ownerId) errs.push("Owner is required for this section.");
+      if (req.has("status") && !status) errs.push("Status is required for this section.");
+      if (req.has("updateTargets") && (it.updateTargets || []).length === 0) {
+        errs.push("At least one update target is required for this section.");
+      }
+
+      if (errs.length) {
+        itemEditState.set(id, {
+          draft: {
+            text,
+            status: status || "",
+            dueDate: dueDate || "",
+            link: link || "",
+            ownerId: ownerId || "",
+          },
+          error: errs.join(" "),
+        });
+        renderAll();
+        return;
+      }
 
       it.text = text;
-      it.status = (status.trim() || null);
-      it.dueDate = (dueDate.trim() || null);
-      it.link = (link.trim() || null);
+      it.ownerId = ownerId;
+      it.status = status;
+      it.dueDate = dueDate;
+      it.link = link;
       it.updatedAt = nowIso();
 
+      itemEditState.delete(id);
       markDirty();
       await saveLocal();
+      renderAll();
+    });
+  });
+
+  rootEl.querySelectorAll("[data-cancel-item]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-cancel-item");
+      itemEditState.delete(id);
       renderAll();
     });
   });
@@ -1107,6 +1251,7 @@ function wireItemButtons(rootEl) {
       if (!confirm("Delete this item?")) return;
       it.deleted = true;
       it.updatedAt = nowIso();
+      itemEditState.delete(id);
       markDirty();
       await saveLocal();
       renderAll();
