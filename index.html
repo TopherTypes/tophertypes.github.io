@@ -1,258 +1,241 @@
-<!DOCTYPE html>
-<html>
-  <head>
-    <title>Drive API Smoke Test (appDataFolder)</title>
-    <meta charset="utf-8" />
-  </head>
-  <body>
-    <p>Drive API Smoke Test (appDataFolder)</p>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Meeting Notes</title>
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar__left">
+      <div class="brand">
+        <div class="brand__title">Meeting Notes</div>
+        <div class="brand__subtitle">Offline-first • Drive sync • Per-person updates</div>
+      </div>
+    </div>
 
-    <button id="authorize_button" onclick="handleAuthClick()">Authorize</button>
-    <button id="signout_button" onclick="handleSignoutClick()">Sign Out</button>
+    <div class="topbar__right">
+      <div class="statuspill" id="net_status">Checking network…</div>
+      <div class="statuspill" id="sync_status">Local only</div>
 
-    <button onclick="initNotes()">Init notes.json</button>
-<button onclick="loadNotes()">Load notes.json</button>
-<button onclick="saveNotes()">Save notes.json (test write)</button>
+      <button class="btn" id="auth_btn">Sign in</button>
+      <button class="btn btn--ghost" id="signout_btn">Sign out</button>
 
+      <button class="btn btn--primary" id="sync_btn">Sync</button>
+    </div>
+  </header>
 
-    <pre id="content" style="white-space: pre-wrap;"></pre>
+  <main class="layout">
+    <nav class="tabs">
+      <button class="tab is-active" data-tab="meeting">Meeting</button>
+      <button class="tab" data-tab="updates">Updates</button>
+      <button class="tab" data-tab="topics">Topics</button>
+      <button class="tab" data-tab="search">Search</button>
+      <button class="tab" data-tab="settings">Settings</button>
+    </nav>
 
-    <script>
-      /* exported gapiLoaded */
-      /* exported gisLoaded */
-      /* exported handleAuthClick */
-      /* exported handleSignoutClick */
+    <section class="panel is-active" id="tab_meeting">
+      <div class="grid2">
+        <div class="card">
+          <h2>Create / Open meeting</h2>
 
-      // TODO: paste these from Google Cloud Console
-      const CLIENT_ID = "15768027919-fs339ovijr4ueh0hkn77974bmbq8d9m1.apps.googleusercontent.com";
-      const API_KEY = "AIzaSyCxjOFISZK_OMVHN22OSdLf5CaLAeC9yDk";
+          <div class="formrow">
+            <label>Template</label>
+            <select id="meeting_template"></select>
+          </div>
 
-      // Drive API discovery doc
-      const DISCOVERY_DOC = "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest";
+          <div class="formrow">
+            <label>Topic / Project</label>
+            <div class="row">
+              <select id="meeting_topic"></select>
+              <button class="btn btn--ghost" id="add_topic_btn">+ Topic</button>
+            </div>
+          </div>
 
-      // Minimal scope for hidden app data folder
-      const SCOPES = "https://www.googleapis.com/auth/drive.appdata";
+          <div class="formrow">
+            <label>Meeting title (optional)</label>
+            <input id="meeting_title" type="text" placeholder="e.g., Weekly catch-up" />
+          </div>
 
-      let tokenClient;
-      let gapiInited = false;
-      let gisInited = false;
+          <div class="formrow">
+            <label>Date/time</label>
+            <input id="meeting_datetime" type="datetime-local" />
+          </div>
 
-      document.getElementById("authorize_button").style.visibility = "hidden";
-      document.getElementById("signout_button").style.visibility = "hidden";
+          <div class="row row--space">
+            <button class="btn btn--primary" id="create_meeting_btn">Create meeting</button>
+            <button class="btn" id="open_meeting_btn">Open existing…</button>
+          </div>
 
-      function append(text) {
-        const content = document.getElementById("content");
-        content.textContent += text + "\n";
-      }
+          <hr />
 
-      async function listAppDataFiles() {
-        append("Listing files in appDataFolder...");
-        const res = await gapi.client.drive.files.list({
-          spaces: "appDataFolder",
-          fields: "files(id, name, modifiedTime, size)"
-        });
+          <div class="formrow">
+            <label>Current meeting</label>
+            <div class="muted" id="current_meeting_label">None selected.</div>
+          </div>
 
-        const files = res.result.files || [];
-        if (!files.length) {
-          append("No files found in appDataFolder (this is fine for first run).");
-          return;
-        }
+          <div class="row row--space">
+            <button class="btn" id="download_meeting_summary_btn">Copy meeting summary</button>
+            <button class="btn btn--ghost" id="delete_meeting_btn">Delete meeting</button>
+          </div>
+        </div>
 
-        append(`Found ${files.length} file(s):`);
-        for (const f of files) {
-          append(`- ${f.name} (id=${f.id}, modified=${f.modifiedTime})`);
-        }
-      }
+        <div class="card">
+          <h2>Quick lookup</h2>
+          <div class="formrow">
+            <label>Search past notes</label>
+            <input id="quick_search" type="text" placeholder="Type to search…" />
+          </div>
+          <div id="quick_search_results" class="list"></div>
+        </div>
+      </div>
 
-      function gapiLoaded() {
-        gapi.load("client", async () => {
-          await gapi.client.init({
-            apiKey: API_KEY,
-            discoveryDocs: [DISCOVERY_DOC],
-          });
-          gapiInited = true;
-          maybeEnableButtons();
-        });
-      }
+      <div class="card" id="meeting_work_area">
+        <h2>Meeting notes</h2>
+        <div class="muted">Create or open a meeting to start taking notes.</div>
+      </div>
+    </section>
 
-      function gisLoaded() {
-        tokenClient = google.accounts.oauth2.initTokenClient({
-          client_id: CLIENT_ID,
-          scope: SCOPES,
-          callback: "", // set later
-        });
-        gisInited = true;
-        maybeEnableButtons();
-      }
+    <section class="panel" id="tab_updates">
+      <div class="card">
+        <h2>Updates by person</h2>
 
-      function maybeEnableButtons() {
-        if (gapiInited && gisInited) {
-          document.getElementById("authorize_button").style.visibility = "visible";
-        }
-      }
+        <div class="grid2">
+          <div>
+            <div class="formrow">
+              <label>Person</label>
+              <select id="updates_person"></select>
+            </div>
 
-      function handleAuthClick() {
-        tokenClient.callback = async (resp) => {
-          if (resp.error !== undefined) {
-            throw resp;
-          }
-          document.getElementById("signout_button").style.visibility = "visible";
-          document.getElementById("authorize_button").textContent = "Re-authorize";
-          document.getElementById("content").textContent = "";
-          await listAppDataFiles();
-        };
+            <div class="row row--space">
+              <button class="btn btn--primary" id="mark_updates_btn">Mark all shown as updated</button>
+              <button class="btn" id="copy_updates_btn">Copy updates text</button>
+            </div>
 
-        // Prompt for consent the first time; silent refresh after
-        if (gapi.client.getToken() === null) {
-          tokenClient.requestAccessToken({ prompt: "consent" });
-        } else {
-          tokenClient.requestAccessToken({ prompt: "" });
-        }
-      }
+            <p class="muted">
+              This marks updates only for the selected person — if an item also targets other people,
+              it stays pending for them.
+            </p>
+          </div>
 
-      function handleSignoutClick() {
-        const token = gapi.client.getToken();
-        if (token !== null) {
-          google.accounts.oauth2.revoke(token.access_token);
-          gapi.client.setToken("");
-          document.getElementById("content").textContent = "";
-          document.getElementById("authorize_button").textContent = "Authorize";
-          document.getElementById("signout_button").style.visibility = "hidden";
-        }
-      }
-    </script>
+          <div>
+            <div class="formrow">
+              <label>Filter</label>
+              <input id="updates_filter" type="text" placeholder="Filter pending updates…" />
+            </div>
+            <div class="muted" id="updates_count"></div>
+          </div>
+        </div>
 
-    <script>
-  const NOTES_FILENAME = "meeting-notes.v1.json";
+        <div id="updates_list" class="list"></div>
+      </div>
+    </section>
 
-  async function findNotesFileId() {
-    const res = await gapi.client.drive.files.list({
-      spaces: "appDataFolder",
-      q: `name='${NOTES_FILENAME.replace(/'/g, "\\'")}' and trashed=false`,
-      fields: "files(id, name, modifiedTime)",
-      pageSize: 10
-    });
-    const files = res.result.files || [];
-    return files.length ? files[0].id : null;
-  }
+    <section class="panel" id="tab_topics">
+      <div class="card">
+        <h2>Topic overview</h2>
 
-  async function createNotesFile(initialJson) {
-    // Create file metadata in appDataFolder
-    const metadata = {
-      name: NOTES_FILENAME,
-      parents: ["appDataFolder"],
-      mimeType: "application/json"
-    };
+        <div class="grid2">
+          <div class="formrow">
+            <label>Topic</label>
+            <select id="topics_topic"></select>
+          </div>
 
-    const boundary = "-------314159265358979323846";
-    const delimiter = "\r\n--" + boundary + "\r\n";
-    const closeDelim = "\r\n--" + boundary + "--";
+          <div class="formrow">
+            <label>Focus</label>
+            <select id="topics_focus">
+              <option value="overview">Overview</option>
+              <option value="actions">Open actions</option>
+              <option value="decisions">Decisions</option>
+              <option value="questions">Questions</option>
+              <option value="info">Information</option>
+            </select>
+          </div>
+        </div>
 
-    const multipartRequestBody =
-      delimiter +
-      "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
-      JSON.stringify(metadata) +
-      delimiter +
-      "Content-Type: application/json\r\n\r\n" +
-      JSON.stringify(initialJson) +
-      closeDelim;
+        <div id="topic_output" class="list"></div>
+      </div>
+    </section>
 
-    const res = await gapi.client.request({
-      path: "/upload/drive/v3/files?uploadType=multipart&fields=id,name,modifiedTime",
-      method: "POST",
-      headers: { "Content-Type": 'multipart/related; boundary="' + boundary + '"' },
-      body: multipartRequestBody
-    });
+    <section class="panel" id="tab_search">
+      <div class="card">
+        <h2>Search everything</h2>
+        <div class="grid2">
+          <div class="formrow">
+            <label>Search</label>
+            <input id="search_query" type="text" placeholder="e.g., 'supplier', 'decision', 'Afonso'…" />
+          </div>
+          <div class="formrow">
+            <label>Type</label>
+            <select id="search_type">
+              <option value="all">All</option>
+              <option value="info">Info</option>
+              <option value="question">Question</option>
+              <option value="decision">Decision</option>
+              <option value="action">Action</option>
+            </select>
+          </div>
+        </div>
+        <div id="search_results" class="list"></div>
+      </div>
+    </section>
 
-    return res.result.id;
-  }
+    <section class="panel" id="tab_settings">
+      <div class="grid2">
+        <div class="card">
+          <h2>People</h2>
+          <div class="row">
+            <input id="new_person_name" type="text" placeholder="Add a person…" />
+            <button class="btn btn--primary" id="add_person_btn">Add</button>
+          </div>
+          <div id="people_list" class="list"></div>
+        </div>
 
-  async function downloadNotesJson(fileId) {
-    const res = await gapi.client.request({
-      path: `/drive/v3/files/${fileId}`,
-      method: "GET",
-      params: { alt: "media" }
-    });
-    // gapi returns parsed JSON if response is JSON, otherwise text
-    return res.body ? JSON.parse(res.body) : res.result;
-  }
+        <div class="card">
+          <h2>Groups</h2>
+          <div class="row">
+            <input id="new_group_name" type="text" placeholder="Add a group…" />
+            <button class="btn btn--primary" id="add_group_btn">Add</button>
+          </div>
+          <div class="muted">Groups expand to people at the time you tag an item.</div>
+          <div id="groups_list" class="list"></div>
+        </div>
+      </div>
 
-  async function uploadNotesJson(fileId, jsonObj) {
-    const res = await gapi.client.request({
-      path: `/upload/drive/v3/files/${fileId}`,
-      method: "PATCH",
-      params: { uploadType: "media" },
-      headers: { "Content-Type": "application/json; charset=UTF-8" },
-      body: JSON.stringify(jsonObj)
-    });
-    return res;
-  }
+      <div class="grid2">
+        <div class="card">
+          <h2>Backup</h2>
+          <div class="row row--space">
+            <button class="btn" id="download_json_btn">Download JSON backup</button>
+            <label class="btn btn--ghost" for="import_json_file">Import JSON</label>
+            <input id="import_json_file" type="file" accept="application/json" style="display:none" />
+          </div>
+          <p class="muted">
+            Import merges into your local data. You can then Sync to Drive if you want.
+          </p>
+        </div>
 
-  async function ensureNotesFile() {
-    let fileId = await findNotesFileId();
-    if (!fileId) {
-      append("notes file not found; creating in appDataFolder...");
-      const initial = makeEmptyDb();
-      fileId = await createNotesFile(initial);
-      append(`created ${NOTES_FILENAME} (id=${fileId})`);
-    } else {
-      append(`found ${NOTES_FILENAME} (id=${fileId})`);
-    }
-    return fileId;
-  }
+        <div class="card">
+          <h2>Templates</h2>
+          <div class="muted">This version ships with Standard + 1:1 templates. We can add more later.</div>
+          <div id="templates_list" class="list"></div>
+        </div>
+      </div>
+    </section>
+  </main>
 
-  function makeEmptyDb() {
-    return {
-      schemaVersion: 1,
-      updatedAt: new Date().toISOString(),
-      people: [],
-      groups: [],
-      topics: [],
-      meetings: [],
-      items: []
-    };
-  }
-</script>
+  <footer class="footer">
+    <div class="muted">
+      Tip: Use it offline freely. When you’re online, hit <strong>Sync</strong>. The Drive file is stored hidden in your account.
+    </div>
+  </footer>
 
-    <script>
-  let notesFileId = null;
-  let cachedDb = null;
+  <script src="app.js"></script>
 
-  async function initNotes() {
-    document.getElementById("content").textContent = "";
-    notesFileId = await ensureNotesFile();
-  }
-
-  async function loadNotes() {
-    document.getElementById("content").textContent = "";
-    notesFileId = notesFileId || (await ensureNotesFile());
-    cachedDb = await downloadNotesJson(notesFileId);
-    append("Loaded DB:");
-    append(JSON.stringify(cachedDb, null, 2));
-  }
-
-  async function saveNotes() {
-    document.getElementById("content").textContent = "";
-    notesFileId = notesFileId || (await ensureNotesFile());
-    cachedDb = cachedDb || makeEmptyDb();
-
-    // test write: update timestamp + write a tiny marker record
-    cachedDb.updatedAt = new Date().toISOString();
-    cachedDb._lastTestWrite = cachedDb.updatedAt;
-
-    await uploadNotesJson(notesFileId, cachedDb);
-    append("Saved DB to Drive (appDataFolder). Now reload to confirm.");
-  }
-</script>
-
-
-
-    <!-- Google API client library -->
-    <script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
-
-    <!-- Google Identity Services -->
-    <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
-  </body>
+  <!-- Google API client library -->
+  <script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
+  <!-- Google Identity Services -->
+  <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
+</body>
 </html>
-
-
