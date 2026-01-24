@@ -1,14 +1,84 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
   <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="X-UA-Compatible" content="ie=edge">
-    <title>My Website</title>
+    <title>Drive API Smoke Test (appDataFolder)</title>
+    <meta charset="utf-8" />
   </head>
   <body>
-    <main>
-        <h1>Welcome to My Website</h1>  
-    </main>
-  </body>
-</html>
+    <p>Drive API Smoke Test (appDataFolder)</p>
+
+    <button id="authorize_button" onclick="handleAuthClick()">Authorize</button>
+    <button id="signout_button" onclick="handleSignoutClick()">Sign Out</button>
+
+    <pre id="content" style="white-space: pre-wrap;"></pre>
+
+    <script>
+      /* exported gapiLoaded */
+      /* exported gisLoaded */
+      /* exported handleAuthClick */
+      /* exported handleSignoutClick */
+
+      // TODO: paste these from Google Cloud Console
+      const CLIENT_ID = "15768027919-fs339ovijr4ueh0hkn77974bmbq8d9m1.apps.googleusercontent.com";
+      const API_KEY = "AIzaSyCxjOFISZK_OMVHN22OSdLf5CaLAeC9yDk";
+
+      // Drive API discovery doc
+      const DISCOVERY_DOC = "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest";
+
+      // Minimal scope for hidden app data folder
+      const SCOPES = "https://www.googleapis.com/auth/drive.appdata";
+
+      let tokenClient;
+      let gapiInited = false;
+      let gisInited = false;
+
+      document.getElementById("authorize_button").style.visibility = "hidden";
+      document.getElementById("signout_button").style.visibility = "hidden";
+
+      function append(text) {
+        const content = document.getElementById("content");
+        content.textContent += text + "\n";
+      }
+
+      async function listAppDataFiles() {
+        append("Listing files in appDataFolder...");
+        const res = await gapi.client.drive.files.list({
+          spaces: "appDataFolder",
+          fields: "files(id, name, modifiedTime, size)"
+        });
+
+        const files = res.result.files || [];
+        if (!files.length) {
+          append("No files found in appDataFolder (this is fine for first run).");
+          return;
+        }
+
+        append(`Found ${files.length} file(s):`);
+        for (const f of files) {
+          append(`- ${f.name} (id=${f.id}, modified=${f.modifiedTime})`);
+        }
+      }
+
+      function gapiLoaded() {
+        gapi.load("client", async () => {
+          await gapi.client.init({
+            apiKey: API_KEY,
+            discoveryDocs: [DISCOVERY_DOC],
+          });
+          gapiInited = true;
+          maybeEnableButtons();
+        });
+      }
+
+      function gisLoaded() {
+        tokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: CLIENT_ID,
+          scope: SCOPES,
+          callback: "", // set later
+        });
+        gisInited = true;
+        maybeEnableButtons();
+      }
+
+      function maybeEnableButtons() {
+        if (gapiI
