@@ -156,6 +156,12 @@ textarea{min-height:70px; resize:vertical;}
 label{font-size:12px; color: var(--muted);}
 
 .list{display:flex; flex-direction:column; gap:10px; margin-top:10px;}
+.filters{
+  display:grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap:12px;
+  margin-bottom:12px;
+}
 
 .item{
   border:1px solid var(--border);
