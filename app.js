@@ -26,6 +26,7 @@ let driveReady = false;
 
 let db = null;            // in-memory working DB
 let currentMeetingId = null;
+let actionsFilters = { ownerId: null, topicId: "", status: "" };
 
 let syncInProgress = false;
 let hasUnsyncedChanges = false;
@@ -136,6 +137,10 @@ function makeDefaultDb() {
   return {
     schemaVersion: 1,
     updatedAt: nowIso(),
+    settings: {
+      defaultOwnerName: "",
+      updatedAt: nowIso(),
+    },
     templates: [standard, oneToOne],
     people: [],
     groups: [],
@@ -471,10 +476,13 @@ function mergeDb(localDb, remoteDb) {
   // schema guard
   const l = localDb || makeDefaultDb();
   const r = remoteDb || makeDefaultDb();
+  const lSettings = l.settings || { defaultOwnerName: "", updatedAt: l.updatedAt || nowIso() };
+  const rSettings = r.settings || { defaultOwnerName: "", updatedAt: r.updatedAt || nowIso() };
 
   const merged = {
     schemaVersion: 1,
     updatedAt: nowIso(),
+    settings: mergeRecord(lSettings, rSettings),
     templates: mergeCollections(l.templates || [], r.templates || []),
     people: mergeCollections(l.people || [], r.people || []),
     groups: mergeCollections(l.groups || [], r.groups || []),
@@ -501,11 +509,20 @@ async function loadLocal() {
     await idbSet("db", db);
   }
 
+  if (!db.settings) {
+    db.settings = { defaultOwnerName: "", updatedAt: nowIso() };
+  }
+
   if (meta) {
     currentMeetingId = meta.currentMeetingId || null;
     hasUnsyncedChanges = !!meta.hasUnsyncedChanges;
     lastSyncAt = meta.lastSyncAt || null;
     lastRemoteModifiedTime = meta.lastRemoteModifiedTime || null;
+    actionsFilters = {
+      ownerId: meta.actionsFilters?.ownerId ?? null,
+      topicId: meta.actionsFilters?.topicId || "",
+      status: meta.actionsFilters?.status || "",
+    };
   } else {
     await saveMeta();
   }
@@ -522,7 +539,8 @@ async function saveMeta() {
     currentMeetingId,
     hasUnsyncedChanges,
     lastSyncAt,
-    lastRemoteModifiedTime
+    lastRemoteModifiedTime,
+    actionsFilters
   });
   updateAuthUi();
 }
@@ -738,6 +756,34 @@ function renderPeople() {
       renderAll();
     });
   });
+}
+
+function getDefaultActionsOwnerId() {
+  const name = db.settings?.defaultOwnerName?.trim() || "";
+  if (!name) return "";
+  const match = alive(db.people).find(p => p.name.toLowerCase() === name.toLowerCase());
+  return match ? match.id : "";
+}
+
+function renderActionsFiltersOptions() {
+  const ownerSel = byId("actions_owner");
+  const topicSel = byId("actions_topic");
+
+  if (!ownerSel || !topicSel) return;
+
+  const people = alive(db.people).sort((a,b)=>a.name.localeCompare(b.name));
+  renderSelectOptions(
+    ownerSel,
+    people.map(p => ({ value:p.id, label:p.name })),
+    { placeholder: "All people" }
+  );
+
+  const topics = alive(db.topics).sort((a,b)=>a.name.localeCompare(b.name));
+  renderSelectOptions(
+    topicSel,
+    topics.map(t => ({ value:t.id, label:t.name })),
+    { placeholder: "All topics" }
+  );
 }
 
 function renderGroups() {
@@ -1213,6 +1259,41 @@ function renderUpdates() {
   list.dataset.pendingIds = JSON.stringify(pending.map(x => x.id));
 }
 
+function renderActionsDashboard() {
+  const ownerSel = byId("actions_owner");
+  const topicSel = byId("actions_topic");
+  const statusSel = byId("actions_status");
+  const list = byId("actions_list");
+  const count = byId("actions_count");
+
+  if (!ownerSel || !topicSel || !statusSel || !list) return;
+
+  if (actionsFilters.ownerId === null) {
+    actionsFilters.ownerId = getDefaultActionsOwnerId();
+    saveMeta().catch(console.error);
+  }
+
+  ownerSel.value = actionsFilters.ownerId || "";
+  topicSel.value = actionsFilters.topicId || "";
+  statusSel.value = actionsFilters.status || "";
+
+  const ownerId = ownerSel.value || "";
+  const topicId = topicSel.value || "";
+  const status = statusSel.value || "";
+
+  const matches = alive(db.items).filter(it => it.section === "action")
+    .filter(it => !ownerId || it.ownerId === ownerId)
+    .filter(it => !topicId || it.topicId === topicId)
+    .filter(it => !status || ((it.status || "open") === status))
+    .sort((a,b)=>Date.parse(b.updatedAt)-Date.parse(a.updatedAt));
+
+  if (count) count.textContent = `${matches.length} action item(s)`;
+
+  list.innerHTML = matches.map(it => renderItemCard(it)).join("")
+    || `<div class="muted">No actions match these filters.</div>`;
+  wireItemButtons(list);
+}
+
 function renderTopicOverview() {
   const topicId = byId("topics_topic").value || "";
   const focus = byId("topics_focus").value || "overview";
@@ -1302,13 +1383,20 @@ function renderAll() {
   renderTopics();
   renderPeople();
   renderGroups();
+  renderActionsFiltersOptions();
   renderCurrentMeetingHeader();
 
   // update overview selects might have changed
   renderUpdates();
+  renderActionsDashboard();
   renderTopicOverview();
   renderSearch();
   renderQuickSearch();
+
+  const defaultOwnerInput = byId("default_owner_name");
+  if (defaultOwnerInput && document.activeElement !== defaultOwnerInput) {
+    defaultOwnerInput.value = db.settings?.defaultOwnerName || "";
+  }
 }
 
 /* ================================
@@ -1540,6 +1628,22 @@ function wireUpdatesControls() {
   byId("copy_updates_btn").addEventListener("click", copyPendingUpdatesText);
 }
 
+function wireActionsControls() {
+  const updateFilters = () => {
+    actionsFilters = {
+      ownerId: byId("actions_owner").value || "",
+      topicId: byId("actions_topic").value || "",
+      status: byId("actions_status").value || "",
+    };
+    saveMeta().catch(console.error);
+    renderActionsDashboard();
+  };
+
+  byId("actions_owner").addEventListener("change", updateFilters);
+  byId("actions_topic").addEventListener("change", updateFilters);
+  byId("actions_status").addEventListener("change", updateFilters);
+}
+
 function wireTopicControls() {
   byId("topics_topic").addEventListener("change", renderTopicOverview);
   byId("topics_focus").addEventListener("change", renderTopicOverview);
@@ -1578,6 +1682,16 @@ function wireSettingsControls() {
     await importJsonBackup(f);
     e.target.value = "";
   });
+
+  const defaultOwnerInput = byId("default_owner_name");
+  defaultOwnerInput.addEventListener("input", debounce(async () => {
+    db.settings = db.settings || { defaultOwnerName: "", updatedAt: nowIso() };
+    db.settings.defaultOwnerName = defaultOwnerInput.value.trim();
+    db.settings.updatedAt = nowIso();
+    markDirty();
+    await saveLocal();
+    renderActionsDashboard();
+  }, 200));
 }
 
 /* ================================
@@ -1590,6 +1704,7 @@ async function init() {
   wireTopButtons();
   wireMeetingControls();
   wireUpdatesControls();
+  wireActionsControls();
   wireTopicControls();
   wireSearchControls();
   wireSettingsControls();
