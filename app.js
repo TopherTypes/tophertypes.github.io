@@ -969,7 +969,9 @@ function renderMeetingSections(meeting, tpl) {
   const sections = tpl?.sections || [];
   const items = alive(db.items).filter(i => i.meetingId === meeting.id);
 
-  container.innerHTML = sections.map(sec => {
+  container.innerHTML = `
+    <div class="sections-grid">
+      ${sections.map(sec => {
     const secItems = items.filter(i => i.section === sec.key);
     const requires = new Set(sec.requires || []);
 
@@ -978,12 +980,13 @@ function renderMeetingSections(meeting, tpl) {
     const targetsRequired = requires.has("updateTargets");
 
     return `
-      <div class="sectionhead">
-        <h3>${escapeHtml(sec.label)}</h3>
-        <div class="muted">Section key: <span class="kbd">${escapeHtml(sec.key)}</span></div>
-      </div>
+      <section class="sectioncard">
+        <div class="sectionhead">
+          <h3>${escapeHtml(sec.label)}</h3>
+          <div class="muted">Section key: <span class="kbd">${escapeHtml(sec.key)}</span></div>
+        </div>
 
-      <div class="sectionbox" data-section="${escapeHtml(sec.key)}">
+        <div class="sectionbox sectionbox--compact" data-section="${escapeHtml(sec.key)}">
         <div class="grid2">
           <div>
             <div class="formrow">
@@ -1068,8 +1071,11 @@ function renderMeetingSections(meeting, tpl) {
           ${secItems.map(it => renderItemCard(it)).join("") || `<div class="muted">Nothing yet.</div>`}
         </div>
       </div>
+      </section>
     `;
-  }).join("");
+  }).join("")}
+    </div>
+  `;
 
   // wire add buttons & item actions
   container.querySelectorAll("[data-add-item]").forEach(btn => {

@@ -103,7 +103,8 @@ body{
 .meeting-notes-card{
   background: rgba(15,21,34,0.7);
   border-color: rgba(106,169,255,0.2);
-  min-height:60vh;
+  min-height:0;
+  padding:14px;
 }
 
 .card{
@@ -255,6 +256,53 @@ label{font-size:12px; color: var(--muted);}
   border-radius:16px;
   padding:14px;
   background: rgba(255,255,255,0.02);
+}
+.sections-grid{
+  display:grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap:12px;
+  margin-top:12px;
+}
+.sectioncard{
+  border:1px solid var(--border);
+  border-radius:16px;
+  padding:12px;
+  background: rgba(255,255,255,0.02);
+}
+.sectioncard .sectionhead{margin:0 0 8px;}
+.sectionbox--compact{
+  border:0;
+  padding:0;
+  background: transparent;
+}
+.sectionbox--compact .grid2{gap:10px;}
+.sectionbox--compact .formrow{margin:6px 0; gap:4px;}
+.sectionbox--compact input,
+.sectionbox--compact select,
+.sectionbox--compact textarea{
+  padding:8px 10px;
+  border-radius:10px;
+  font-size:12px;
+}
+.sectionbox--compact textarea{min-height:56px;}
+.sectionbox--compact hr{margin:10px 0;}
+.sectionbox--compact .list{
+  max-height:180px;
+  overflow:auto;
+  padding-right:4px;
+}
+.sectionbox--compact .picker{gap:8px;}
+.sectionbox--compact .pickcol{
+  padding:8px;
+  border-radius:12px;
+}
+.sectionbox--compact .picklist{
+  max-height:120px;
+  overflow:auto;
+}
+.sectionbox--compact .checkline{font-size:12px;}
+@media (max-width: 1000px){
+  .sections-grid{grid-template-columns:1fr}
 }
 
 .meeting-calendar{
