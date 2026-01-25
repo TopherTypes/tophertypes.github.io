@@ -391,7 +391,8 @@ function maybeEnableAuth() {
 }
 
 function updateAuthUi() {
-  const token = gapi?.client?.getToken?.() || null;
+  const gapiClient = window.gapi?.client;
+  const token = gapiClient?.getToken?.() || null;
   driveReady = !!token;
 
   const authBtn = byId("auth_btn");
@@ -409,6 +410,10 @@ function updateAuthUi() {
 
 async function handleAuthClick() {
   if (!tokenClient) return;
+  if (!window.gapi || !window.google) {
+    alert("Google APIs are unavailable. Check your network or ad blocker settings.");
+    return;
+  }
 
   tokenClient.callback = async (resp) => {
     if (resp.error) {
@@ -417,7 +422,7 @@ async function handleAuthClick() {
       return;
     }
     // attach token to gapi
-    gapi.client.setToken(resp);
+    window.gapi?.client?.setToken?.(resp);
 
     updateAuthUi();
 
@@ -428,7 +433,8 @@ async function handleAuthClick() {
   };
 
   // prompt consent first time, silent refresh after
-  const token = gapi.client.getToken();
+  const gapiClient = window.gapi?.client;
+  const token = gapiClient?.getToken?.() || null;
   if (token === null) {
     tokenClient.requestAccessToken({ prompt: "consent" });
   } else {
@@ -437,10 +443,16 @@ async function handleAuthClick() {
 }
 
 function handleSignoutClick() {
-  const token = gapi.client.getToken();
+  const gapiClient = window.gapi?.client;
+  if (!gapiClient || !window.google) {
+    driveReady = false;
+    updateAuthUi();
+    return;
+  }
+  const token = gapiClient.getToken();
   if (token) {
-    google.accounts.oauth2.revoke(token.access_token);
-    gapi.client.setToken("");
+    window.google.accounts.oauth2.revoke(token.access_token);
+    gapiClient.setToken("");
   }
   driveReady = false;
   updateAuthUi();
