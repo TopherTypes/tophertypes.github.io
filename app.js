@@ -743,6 +743,10 @@ function setMeetingView(view) {
     const isActive = panel.getAttribute("data-meeting-view-panel") === view;
     panel.classList.toggle("is-active", isActive);
     panel.hidden = !isActive;
+    btn.classList.toggle("is-active", btn.getAttribute("data-meeting-view") === view);
+  });
+  document.querySelectorAll("[data-meeting-view-panel]").forEach(panel => {
+    panel.classList.toggle("is-active", panel.getAttribute("data-meeting-view-panel") === view);
   });
 }
 
