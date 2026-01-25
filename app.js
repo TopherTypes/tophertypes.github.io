@@ -2352,33 +2352,46 @@ function wireSearchControls() {
 }
 
 function wireSettingsControls() {
-  byId("add_group_btn").addEventListener("click", async () => {
-    const name = byId("new_group_name").value.trim();
-    if (!name) return;
-    db.groups.push({ id: uid("group"), name, memberIds: [], updatedAt: nowIso() });
-    byId("new_group_name").value = "";
-    markDirty();
-    await saveLocal();
-    renderAll();
-  });
+  const addGroupBtn = byId("add_group_btn");
+  if (addGroupBtn) {
+    addGroupBtn.addEventListener("click", async () => {
+      const nameInput = byId("new_group_name");
+      const name = nameInput?.value.trim() || "";
+      if (!name) return;
+      db.groups.push({ id: uid("group"), name, memberIds: [], updatedAt: nowIso() });
+      nameInput.value = "";
+      markDirty();
+      await saveLocal();
+      renderAll();
+    });
+  }
 
-  byId("download_json_btn").addEventListener("click", downloadJsonBackup);
-  byId("import_json_file").addEventListener("change", async (e) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    await importJsonBackup(f);
-    e.target.value = "";
-  });
+  const downloadJsonBtn = byId("download_json_btn");
+  if (downloadJsonBtn) {
+    downloadJsonBtn.addEventListener("click", downloadJsonBackup);
+  }
+
+  const importJsonFile = byId("import_json_file");
+  if (importJsonFile) {
+    importJsonFile.addEventListener("change", async (e) => {
+      const f = e.target.files?.[0];
+      if (!f) return;
+      await importJsonBackup(f);
+      e.target.value = "";
+    });
+  }
 
   const defaultOwnerInput = byId("default_owner_name");
-  defaultOwnerInput.addEventListener("input", debounce(async () => {
-    db.settings = db.settings || { defaultOwnerName: "", updatedAt: nowIso() };
-    db.settings.defaultOwnerName = defaultOwnerInput.value.trim();
-    db.settings.updatedAt = nowIso();
-    markDirty();
-    await saveLocal();
-    renderActionsDashboard();
-  }, 200));
+  if (defaultOwnerInput) {
+    defaultOwnerInput.addEventListener("input", debounce(async () => {
+      db.settings = db.settings || { defaultOwnerName: "", updatedAt: nowIso() };
+      db.settings.defaultOwnerName = defaultOwnerInput.value.trim();
+      db.settings.updatedAt = nowIso();
+      markDirty();
+      await saveLocal();
+      renderActionsDashboard();
+    }, 200));
+  }
 }
 
 function wirePeopleControls() {
