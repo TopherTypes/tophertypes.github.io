@@ -3,8 +3,8 @@
 =================================== */
 
 // TODO: paste from Google Cloud Console
-const CLIENT_ID = "PASTE_YOUR_OAUTH_CLIENT_ID_HERE";
-const API_KEY = "PASTE_YOUR_API_KEY_HERE";
+const CLIENT_ID = "15768027919-fs339ovijr4ueh0hkn77974bmbq8d9m1.apps.googleusercontent.com";
+const API_KEY = "AIzaSyCxjOFISZK_OMVHN22OSdLf5CaLAeC9yDk";
 
 const DISCOVERY_DOC = "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest";
 const SCOPES = "https://www.googleapis.com/auth/drive.appdata";
