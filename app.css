@@ -99,6 +99,7 @@ body{
 }
 .meeting-view{display:none; margin-top:16px;}
 .meeting-view.is-active{display:block;}
+.meeting-view[hidden]{display:none;}
 .meeting-notes-card{
   background: rgba(15,21,34,0.7);
   border-color: rgba(106,169,255,0.2);

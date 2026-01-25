@@ -735,6 +735,14 @@ function setActiveTab(name) {
 function setMeetingView(view) {
   meetingView = view;
   document.querySelectorAll("[data-meeting-view]").forEach(btn => {
+    const isActive = btn.getAttribute("data-meeting-view") === view;
+    btn.classList.toggle("is-active", isActive);
+    btn.setAttribute("aria-selected", isActive ? "true" : "false");
+  });
+  document.querySelectorAll("[data-meeting-view-panel]").forEach(panel => {
+    const isActive = panel.getAttribute("data-meeting-view-panel") === view;
+    panel.classList.toggle("is-active", isActive);
+    panel.hidden = !isActive;
     btn.classList.toggle("is-active", btn.getAttribute("data-meeting-view") === view);
   });
   document.querySelectorAll("[data-meeting-view-panel]").forEach(panel => {

@@ -44,12 +44,15 @@
             <div class="muted">Plan meetings in the calendar, then switch to Notes for a focused capture view.</div>
           </div>
           <div class="segmented" role="tablist" aria-label="Meeting views">
+            <button class="segmented__btn is-active" type="button" data-meeting-view="setup" role="tab" aria-controls="meeting_view_setup" aria-selected="true">Schedule</button>
+            <button class="segmented__btn" type="button" data-meeting-view="notes" role="tab" aria-controls="meeting_view_notes" aria-selected="false">Notes</button>
             <button class="segmented__btn is-active" type="button" data-meeting-view="setup">Schedule</button>
             <button class="segmented__btn" type="button" data-meeting-view="notes">Notes</button>
           </div>
         </div>
       </div>
 
+      <div class="meeting-view is-active" data-meeting-view-panel="setup" id="meeting_view_setup" role="tabpanel">
       <div class="meeting-view is-active" data-meeting-view-panel="setup">
         <div class="grid2">
           <div class="card">
@@ -129,6 +132,7 @@
         </div>
       </div>
 
+      <div class="meeting-view" data-meeting-view-panel="notes" id="meeting_view_notes" role="tabpanel" hidden>
       <div class="meeting-view" data-meeting-view-panel="notes">
         <div class="card meeting-notes-card" id="meeting_work_area">
           <h2>Meeting notes</h2>
