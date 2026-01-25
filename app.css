@@ -82,6 +82,29 @@ body{
 .panel{display:none; margin-top:16px;}
 .panel.is-active{display:block;}
 
+.meeting-shell{
+  margin-top:16px;
+}
+.meeting-shell__header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  flex-wrap:wrap;
+  padding:16px;
+  border:1px solid var(--border);
+  border-radius:16px;
+  background: rgba(255,255,255,0.02);
+  box-shadow: var(--shadow);
+}
+.meeting-view{display:none; margin-top:16px;}
+.meeting-view.is-active{display:block;}
+.meeting-notes-card{
+  background: rgba(15,21,34,0.7);
+  border-color: rgba(106,169,255,0.2);
+  min-height:60vh;
+}
+
 .card{
   background: rgba(18,24,38,0.55);
   border:1px solid var(--border);
