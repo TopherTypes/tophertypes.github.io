@@ -9,6 +9,8 @@ const API_KEY = "AIzaSyCxjOFISZK_OMVHN22OSdLf5CaLAeC9yDk";
 const DISCOVERY_DOC = "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest";
 const SCOPES = "https://www.googleapis.com/auth/drive.appdata";
 const DRIVE_FILENAME = "meeting-notes.v1.json";
+const STANDARD_TEMPLATE_ID = "tpl_standard";
+const ONE_TO_ONE_TEMPLATE_ID = "tpl_1on1";
 
 // IndexedDB
 const IDB_NAME = "meeting-notes-db";
@@ -86,6 +88,34 @@ function fieldTag(required, key = "") {
       : "";
   }
   return `<span class="field-tag field-tag--required${required ? "" : " is-hidden"}" data-required-tag="${key}">Required</span>`;
+}
+
+function createBuiltinTemplates() {
+  const updatedAt = nowIso();
+  return [
+    {
+      id: STANDARD_TEMPLATE_ID,
+      name: "Standard",
+      updatedAt,
+      sections: [
+        { key: "info",     label: "Information", requires: [] },
+        { key: "question", label: "Questions",   requires: [] },
+        { key: "decision", label: "Decisions",   requires: [] },
+        { key: "action",   label: "Actions",     requires: ["ownerId", "status"] }
+      ]
+    },
+    {
+      id: ONE_TO_ONE_TEMPLATE_ID,
+      name: "1:1",
+      updatedAt,
+      sections: [
+        { key: "info",     label: "Notes",         requires: [] },
+        { key: "decision", label: "Decisions",     requires: [] },
+        { key: "action",   label: "Actions",       requires: ["ownerId", "status"] },
+        { key: "question", label: "Follow-ups",    requires: ["updateTargets"] }
+      ]
+    }
+  ];
 }
 
 function findPersonByName(name, people = alive(db?.people || [])) {
@@ -240,33 +270,6 @@ function formatTime(iso) {
 =================================== */
 
 function makeDefaultDb() {
-  const standardTemplateId = uid("tpl");
-  const oneToOneTemplateId = uid("tpl");
-
-  const standard = {
-    id: standardTemplateId,
-    name: "Standard",
-    updatedAt: nowIso(),
-    sections: [
-      { key: "info",     label: "Information", requires: [] },
-      { key: "question", label: "Questions",   requires: [] },
-      { key: "decision", label: "Decisions",   requires: [] },
-      { key: "action",   label: "Actions",     requires: ["ownerId", "status"] } // dueDate optional
-    ]
-  };
-
-  const oneToOne = {
-    id: oneToOneTemplateId,
-    name: "1:1",
-    updatedAt: nowIso(),
-    sections: [
-      { key: "info",     label: "Notes",         requires: [] },
-      { key: "decision", label: "Decisions",     requires: [] },
-      { key: "action",   label: "Actions",       requires: ["ownerId", "status"] },
-      { key: "question", label: "Follow-ups",    requires: ["updateTargets"] } // encourages tracking updates
-    ]
-  };
-
   // starter people/groups/topics empty
   return {
     schemaVersion: 1,
@@ -275,7 +278,7 @@ function makeDefaultDb() {
       defaultOwnerName: "",
       updatedAt: nowIso(),
     },
-    templates: [standard, oneToOne],
+    templates: createBuiltinTemplates(),
     people: [],
     groups: [],
     topics: [],
@@ -606,6 +609,60 @@ function mergeCollections(localArr, remoteArr) {
   return out;
 }
 
+function normalizeBuiltinTemplates(store) {
+  if (!store) return false;
+  const builtinTemplates = createBuiltinTemplates();
+  const templates = alive(store.templates || []);
+  const meetings = alive(store.meetings || []);
+  let changed = false;
+
+  const updatedTemplates = [...templates];
+
+  for (const builtin of builtinTemplates) {
+    const matches = updatedTemplates.filter(t => t.name === builtin.name);
+    if (!matches.length) {
+      updatedTemplates.push(builtin);
+      changed = true;
+      continue;
+    }
+
+    let winner = matches.find(t => t.id === builtin.id) || matches[0];
+    for (const candidate of matches) {
+      if (isoNewer(candidate.updatedAt, winner.updatedAt)) winner = candidate;
+    }
+
+    if (winner.id !== builtin.id) {
+      const oldId = winner.id;
+      winner.id = builtin.id;
+      meetings.forEach(m => {
+        if (m.templateId === oldId) m.templateId = builtin.id;
+      });
+      changed = true;
+    }
+
+    if (!Array.isArray(winner.sections) || !winner.sections.length) {
+      winner.sections = builtin.sections;
+      changed = true;
+    }
+
+    for (const dup of matches) {
+      if (dup === winner) continue;
+      const oldId = dup.id;
+      meetings.forEach(m => {
+        if (m.templateId === oldId) m.templateId = winner.id;
+      });
+      const idx = updatedTemplates.indexOf(dup);
+      if (idx !== -1) updatedTemplates.splice(idx, 1);
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    store.templates = updatedTemplates;
+  }
+  return changed;
+}
+
 function mergeDb(localDb, remoteDb) {
   // schema guard
   const l = localDb || makeDefaultDb();
@@ -624,6 +681,10 @@ function mergeDb(localDb, remoteDb) {
     meetings: mergeCollections(l.meetings || [], r.meetings || []),
     items: mergeCollections(l.items || [], r.items || []),
   };
+
+  if (normalizeBuiltinTemplates(merged)) {
+    merged.updatedAt = nowIso();
+  }
 
   return merged;
 }
@@ -645,6 +706,11 @@ async function loadLocal() {
 
   if (!db.settings) {
     db.settings = { defaultOwnerName: "", updatedAt: nowIso() };
+  }
+
+  if (normalizeBuiltinTemplates(db)) {
+    markDirty();
+    await saveLocal();
   }
 
   if (meta) {
