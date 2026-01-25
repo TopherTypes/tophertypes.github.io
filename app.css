@@ -248,6 +248,10 @@ label{font-size:12px; color: var(--muted);}
   border-radius:14px;
   padding:12px;
 }
+.item--selected{
+  border-color: rgba(106,169,255,0.45);
+  background: rgba(106,169,255,0.1);
+}
 .item--editing{
   border-color: rgba(106,169,255,0.35);
   background: rgba(106,169,255,0.08);
