@@ -37,86 +37,103 @@
     </nav>
 
     <section class="panel is-active" id="tab_meeting">
-      <div class="grid2">
-        <div class="card">
-          <h2>Create / Open meeting</h2>
-
-          <div class="formrow">
-            <label>Template</label>
-            <select id="meeting_template"></select>
-          </div>
-
-          <div class="formrow">
-            <label>Topic / Project</label>
-            <div class="row">
-              <select id="meeting_topic"></select>
-              <button class="btn btn--ghost" id="add_topic_btn">+ Topic</button>
-            </div>
-          </div>
-
-          <div class="formrow">
-            <label>Meeting title (optional)</label>
-            <input id="meeting_title" type="text" placeholder="e.g., Weekly catch-up" />
-          </div>
-
-          <div class="formrow">
-            <label>Date/time</label>
-            <input id="meeting_datetime" type="datetime-local" />
-          </div>
-
-          <div class="row row--space">
-            <button class="btn btn--primary" id="create_meeting_btn">Create meeting</button>
-            <button class="btn" id="open_meeting_btn">Open existing…</button>
-          </div>
-
-          <hr />
-
-          <div class="formrow">
-            <label>Current meeting</label>
-            <div class="muted" id="current_meeting_label">None selected.</div>
-          </div>
-
-          <div class="row row--space">
-            <button class="btn" id="download_meeting_summary_btn">Copy meeting summary</button>
-            <button class="btn btn--ghost" id="delete_meeting_btn">Delete meeting</button>
-          </div>
-        </div>
-
-        <div class="card">
-          <h2>Quick lookup</h2>
-          <div class="formrow">
-            <label>Search past notes</label>
-            <input id="quick_search" type="text" placeholder="Type to search…" />
-          </div>
-          <div id="quick_search_results" class="list"></div>
-        </div>
-      </div>
-
-      <div class="card meeting-calendar">
-        <div class="calendar-header">
+      <div class="meeting-shell">
+        <div class="meeting-shell__header">
           <div>
-            <h2>Meeting calendar</h2>
-            <div class="muted">Scan every scheduled meeting by date, topic, and time.</div>
+            <h2>Meeting workspace</h2>
+            <div class="muted">Plan meetings in the calendar, then switch to Notes for a focused capture view.</div>
           </div>
-          <div class="calendar-controls">
-            <div class="segmented" role="tablist" aria-label="Calendar view">
-              <button class="segmented__btn is-active" type="button" data-calendar-view="week">Week</button>
-              <button class="segmented__btn" type="button" data-calendar-view="month">Month</button>
-            </div>
-            <div class="calendar-nav">
-              <button class="btn btn--ghost" type="button" data-calendar-nav="prev">◀</button>
-              <button class="btn btn--ghost" type="button" data-calendar-nav="today">Today</button>
-              <button class="btn btn--ghost" type="button" data-calendar-nav="next">▶</button>
-            </div>
+          <div class="segmented" role="tablist" aria-label="Meeting views">
+            <button class="segmented__btn is-active" type="button" data-meeting-view="setup">Schedule</button>
+            <button class="segmented__btn" type="button" data-meeting-view="notes">Notes</button>
           </div>
         </div>
-        <div class="calendar-range muted" id="calendar_range"></div>
-        <div id="meeting_calendar"></div>
       </div>
 
-      <div class="card" id="meeting_work_area">
-        <h2>Meeting notes</h2>
-        <div class="muted">Create or open a meeting to start taking notes.</div>
+      <div class="meeting-view is-active" data-meeting-view-panel="setup">
+        <div class="grid2">
+          <div class="card">
+            <h2>Create / Open meeting</h2>
+
+            <div class="formrow">
+              <label>Template</label>
+              <select id="meeting_template"></select>
+            </div>
+
+            <div class="formrow">
+              <label>Topic / Project</label>
+              <div class="row">
+                <select id="meeting_topic"></select>
+                <button class="btn btn--ghost" id="add_topic_btn">+ Topic</button>
+              </div>
+            </div>
+
+            <div class="formrow">
+              <label>Meeting title (optional)</label>
+              <input id="meeting_title" type="text" placeholder="e.g., Weekly catch-up" />
+            </div>
+
+            <div class="formrow">
+              <label>Date/time</label>
+              <input id="meeting_datetime" type="datetime-local" />
+            </div>
+
+            <div class="row row--space">
+              <button class="btn btn--primary" id="create_meeting_btn">Create meeting</button>
+              <button class="btn" id="open_meeting_btn">Open existing…</button>
+            </div>
+
+            <hr />
+
+            <div class="formrow">
+              <label>Current meeting</label>
+              <div class="muted" id="current_meeting_label">None selected.</div>
+            </div>
+
+            <div class="row row--space">
+              <button class="btn" id="download_meeting_summary_btn">Copy meeting summary</button>
+              <button class="btn btn--ghost" id="delete_meeting_btn">Delete meeting</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>Quick lookup</h2>
+            <div class="formrow">
+              <label>Search past notes</label>
+              <input id="quick_search" type="text" placeholder="Type to search…" />
+            </div>
+            <div id="quick_search_results" class="list"></div>
+          </div>
+        </div>
+
+        <div class="card meeting-calendar">
+          <div class="calendar-header">
+            <div>
+              <h2>Meeting calendar</h2>
+              <div class="muted">Scan every scheduled meeting by date, topic, and time.</div>
+            </div>
+            <div class="calendar-controls">
+              <div class="segmented" role="tablist" aria-label="Calendar view">
+                <button class="segmented__btn is-active" type="button" data-calendar-view="week">Week</button>
+                <button class="segmented__btn" type="button" data-calendar-view="month">Month</button>
+              </div>
+              <div class="calendar-nav">
+                <button class="btn btn--ghost" type="button" data-calendar-nav="prev">◀</button>
+                <button class="btn btn--ghost" type="button" data-calendar-nav="today">Today</button>
+                <button class="btn btn--ghost" type="button" data-calendar-nav="next">▶</button>
+              </div>
+            </div>
+          </div>
+          <div class="calendar-range muted" id="calendar_range"></div>
+          <div id="meeting_calendar"></div>
+        </div>
+      </div>
+
+      <div class="meeting-view" data-meeting-view-panel="notes">
+        <div class="card meeting-notes-card" id="meeting_work_area">
+          <h2>Meeting notes</h2>
+          <div class="muted">Create or open a meeting to start taking notes.</div>
+        </div>
       </div>
     </section>
 
