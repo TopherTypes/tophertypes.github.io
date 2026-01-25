@@ -1069,8 +1069,8 @@ function renderMeetingSections(meeting, tpl) {
         </div>
 
         <div class="sectionbox sectionbox--compact field-table" data-section="${escapeHtml(sec.key)}">
-        <div class="grid2">
-          <div>
+        <div class="section-form">
+          <div class="section-form__col">
             <div class="formrow">
               <label>Text ${fieldTag(true)}</label>
               <textarea data-field="text" placeholder="Type quickly…"></textarea>
@@ -1110,7 +1110,7 @@ function renderMeetingSections(meeting, tpl) {
             </div>
           </div>
 
-          <div>
+          <div class="section-form__col">
             <div class="formrow">
               <label>People to update ${fieldTag(targetsRequired)}</label>
               <div class="picker">
