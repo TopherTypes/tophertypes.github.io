@@ -29,6 +29,7 @@ let currentMeetingId = null;
 let actionsFilters = { ownerId: null, topicId: "", status: "" };
 let meetingCalendarView = "week";
 let meetingCalendarAnchor = new Date();
+let meetingView = "setup";
 
 let syncInProgress = false;
 let hasUnsyncedChanges = false;
@@ -728,6 +729,21 @@ function setActiveTab(name) {
   });
   document.querySelectorAll(".panel").forEach(p => p.classList.remove("is-active"));
   byId(`tab_${name}`).classList.add("is-active");
+  if (name === "meeting") setMeetingView(meetingView);
+}
+
+function setMeetingView(view) {
+  meetingView = view;
+  document.querySelectorAll("[data-meeting-view]").forEach(btn => {
+    const isActive = btn.getAttribute("data-meeting-view") === view;
+    btn.classList.toggle("is-active", isActive);
+    btn.setAttribute("aria-selected", isActive ? "true" : "false");
+  });
+  document.querySelectorAll("[data-meeting-view-panel]").forEach(panel => {
+    const isActive = panel.getAttribute("data-meeting-view-panel") === view;
+    panel.classList.toggle("is-active", isActive);
+    panel.hidden = !isActive;
+  });
 }
 
 function renderSelectOptions(select, options, {placeholder=null} = {}) {
@@ -1366,6 +1382,7 @@ function wireItemButtons(rootEl) {
       if (!m) return;
       currentMeetingId = mid;
       await saveMeta();
+      setMeetingView("notes");
       setActiveTab("meeting");
       renderAll();
     });
@@ -1404,6 +1421,7 @@ function renderMeetingSelectDialog() {
     return;
   }
   currentMeetingId = m.id;
+  setMeetingView("notes");
   saveMeta().then(() => renderAll());
 }
 
@@ -1737,6 +1755,7 @@ async function createMeeting() {
 
   db.meetings.push(meeting);
   currentMeetingId = meeting.id;
+  setMeetingView("notes");
 
   markDirty();
   await saveLocal();
@@ -1947,6 +1966,14 @@ function wireMeetingControls() {
       if (action === "today") resetMeetingCalendarToToday();
     });
   });
+
+  document.querySelectorAll("[data-meeting-view]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const view = btn.getAttribute("data-meeting-view");
+      if (!view) return;
+      setMeetingView(view);
+    });
+  });
 }
 
 function wireUpdatesControls() {
@@ -2056,6 +2083,7 @@ async function init() {
   byId("meeting_datetime").value = localISO;
 
   renderAll();
+  setMeetingView(meetingView);
   updateAuthUi();
 }
 
