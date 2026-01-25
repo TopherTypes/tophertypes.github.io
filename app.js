@@ -79,10 +79,13 @@ function escapeHtml(s){
   }[c]));
 }
 
-function fieldTag(required) {
-  return required
-    ? `<span class="field-tag field-tag--required">Required</span>`
-    : `<span class="field-tag field-tag--optional">Optional</span>`;
+function fieldTag(required, key = "") {
+  if (!key) {
+    return required
+      ? `<span class="field-tag field-tag--required">Required</span>`
+      : "";
+  }
+  return `<span class="field-tag field-tag--required${required ? "" : " is-hidden"}" data-required-tag="${key}">Required</span>`;
 }
 
 function findPersonByName(name, people = alive(db?.people || [])) {
@@ -1051,26 +1054,21 @@ function renderMeetingSections(meeting, tpl) {
   const items = alive(db.items).filter(i => i.meetingId === meeting.id);
 
   container.innerHTML = `
-    <div class="sections-grid">
-      ${sections.map(sec => {
-    const secItems = items.filter(i => i.section === sec.key);
-    const requires = new Set(sec.requires || []);
-
-    const ownerRequired = requires.has("ownerId");
-    const statusRequired = requires.has("status");
-    const targetsRequired = requires.has("updateTargets");
-    const peopleDatalist = people.map(p => `<option value="${escapeHtml(p.name)}"></option>`).join("");
-
-    return `
-      <section class="sectioncard">
-        <div class="sectionhead">
-          <h3>${escapeHtml(sec.label)}</h3>
-          <div class="muted">Section key: <span class="kbd">${escapeHtml(sec.key)}</span></div>
-        </div>
-
-        <div class="sectionbox sectionbox--compact field-table" data-section="${escapeHtml(sec.key)}">
+    <div class="sectioncard sectioncard--entry">
+      <div class="sectionhead">
+        <h3>Add a note</h3>
+        <div class="muted">Choose a type to set the required fields.</div>
+      </div>
+      <div class="sectionbox sectionbox--compact field-table" data-entry-form>
         <div class="section-form">
           <div class="section-form__col">
+            <div class="formrow">
+              <label>Type ${fieldTag(true)}</label>
+              <select data-field="section">
+                ${sections.map(sec => `<option value="${escapeHtml(sec.key)}">${escapeHtml(sec.label)}</option>`).join("")}
+              </select>
+            </div>
+
             <div class="formrow">
               <label>Text ${fieldTag(true)}</label>
               <textarea data-field="text" placeholder="Type quickly…"></textarea>
@@ -1078,15 +1076,15 @@ function renderMeetingSections(meeting, tpl) {
 
             <div class="grid2">
               <div class="formrow">
-                <label>Owner ${fieldTag(ownerRequired)}</label>
-                <input data-field="ownerName" list="owner_list_${escapeHtml(sec.key)}" type="text" placeholder="Type to search…" ${people.length ? "" : "disabled"} />
-                <datalist id="owner_list_${escapeHtml(sec.key)}">
-                  ${peopleDatalist}
+                <label>Owner ${fieldTag(false, "ownerId")}</label>
+                <input data-field="ownerName" list="owner_list_entry" type="text" placeholder="Type to search…" ${people.length ? "" : "disabled"} />
+                <datalist id="owner_list_entry">
+                  ${people.map(p => `<option value="${escapeHtml(p.name)}"></option>`).join("")}
                 </datalist>
               </div>
 
               <div class="formrow">
-                <label>Status ${fieldTag(statusRequired)}</label>
+                <label>Status ${fieldTag(false, "status")}</label>
                 <select data-field="status">
                   <option value="">— None —</option>
                   <option value="open">Open</option>
@@ -1099,12 +1097,12 @@ function renderMeetingSections(meeting, tpl) {
 
             <div class="grid2">
               <div class="formrow">
-                <label>Due date ${fieldTag(false)}</label>
+                <label>Due date</label>
                 <input data-field="dueDate" type="date" />
               </div>
 
               <div class="formrow">
-                <label>Link ${fieldTag(false)}</label>
+                <label>Link</label>
                 <input data-field="link" type="url" placeholder="https://…" />
               </div>
             </div>
@@ -1112,25 +1110,20 @@ function renderMeetingSections(meeting, tpl) {
 
           <div class="section-form__col">
             <div class="formrow">
-              <label>People to update ${fieldTag(targetsRequired)}</label>
-              <div class="picker">
-                <div class="pickcol">
-                  <h4>People</h4>
-                  <div class="people-select" data-people-picker>
-                    <div class="people-select__controls">
-                      <input data-people-input type="text" list="people_list_${escapeHtml(sec.key)}" placeholder="Type a name to add…" ${people.length ? "" : "disabled"} />
-                      <datalist id="people_list_${escapeHtml(sec.key)}">
-                        ${peopleDatalist}
-                      </datalist>
-                      <button class="btn btn--ghost" type="button" data-add-person ${people.length ? "" : "disabled"}>Add</button>
-                    </div>
-                    <div class="people-select__selected" data-selected-list>
-                      <div class="muted" data-empty="true">No people selected yet.</div>
-                    </div>
-                  </div>
+              <label>People to update ${fieldTag(false, "updateTargets")}</label>
+              <div class="update-targets" data-people-picker>
+                <div class="people-select__controls">
+                  <input data-people-input type="text" list="people_list_entry" placeholder="Type a name to add…" ${people.length ? "" : "disabled"} />
+                  <datalist id="people_list_entry">
+                    ${people.map(p => `<option value="${escapeHtml(p.name)}"></option>`).join("")}
+                  </datalist>
+                  <button class="btn btn--ghost" type="button" data-add-person ${people.length ? "" : "disabled"}>Add person</button>
                 </div>
-                <div class="pickcol">
-                  <h4>Groups</h4>
+                <div class="people-select__selected" data-selected-list>
+                  <div class="muted" data-empty="true">No people selected yet.</div>
+                </div>
+                <div class="update-targets__groups">
+                  <div class="muted">Groups</div>
                   <div class="picklist">
                     ${groups.length ? groups.map(g => `
                       <label class="checkline">
@@ -1145,31 +1138,65 @@ function renderMeetingSections(meeting, tpl) {
 
             <div class="row row--space">
               <div class="muted">Tip: use groups for “team”, “stakeholders”, etc.</div>
-              <button class="btn btn--primary" data-add-item="${escapeHtml(sec.key)}">Add</button>
+              <button class="btn btn--primary" data-add-note>Add note</button>
             </div>
           </div>
         </div>
-
-        <hr />
-
-        <div class="muted">${secItems.length} item(s) in this section</div>
-        <div class="list">
-          ${secItems.map(it => renderItemCard(it)).join("") || `<div class="muted">Nothing yet.</div>`}
-        </div>
       </div>
-      </section>
-    `;
-  }).join("")}
+    </div>
+
+    <div class="sections-grid sections-grid--list">
+      ${sections.map(sec => {
+        const secItems = items.filter(i => i.section === sec.key);
+        return `
+          <section class="sectioncard">
+            <div class="sectionhead">
+              <h3>${escapeHtml(sec.label)}</h3>
+              <div class="muted">${secItems.length} item(s)</div>
+            </div>
+            <div class="sectionbox sectionbox--compact">
+              <div class="list">
+                ${secItems.map(it => renderItemCard(it)).join("") || `<div class="muted">Nothing yet.</div>`}
+              </div>
+            </div>
+          </section>
+        `;
+      }).join("")}
     </div>
   `;
 
   wirePeoplePickers(container, people);
 
+  const entryForm = container.querySelector("[data-entry-form]");
+  const typeSelect = entryForm?.querySelector("select[data-field=section]");
+  if (entryForm && typeSelect) {
+    const updateEntryRequirements = () => {
+      const sectionKey = typeSelect.value;
+      const secDef = (tpl?.sections || []).find(s => s.key === sectionKey);
+      const requires = new Set(secDef?.requires || []);
+      const requiredMap = {
+        ownerId: requires.has("ownerId"),
+        status: requires.has("status"),
+        updateTargets: requires.has("updateTargets"),
+      };
+
+      Object.entries(requiredMap).forEach(([key, required]) => {
+        const tag = entryForm.querySelector(`[data-required-tag="${key}"]`);
+        if (tag) {
+          tag.classList.toggle("is-hidden", !required);
+        }
+      });
+    };
+
+    updateEntryRequirements();
+    typeSelect.addEventListener("change", updateEntryRequirements);
+  }
+
   // wire add buttons & item actions
-  container.querySelectorAll("[data-add-item]").forEach(btn => {
+  container.querySelectorAll("[data-add-note]").forEach(btn => {
     btn.addEventListener("click", async () => {
-      const sectionKey = btn.getAttribute("data-add-item");
       const box = btn.closest(".sectionbox");
+      const sectionKey = box.querySelector("select[data-field=section]")?.value || "";
       const text = box.querySelector("textarea[data-field=text]").value.trim();
       const ownerName = box.querySelector("input[data-field=ownerName]")?.value.trim() || "";
       const ownerMatch = ownerName ? findPersonByName(ownerName, people) : null;
@@ -1185,7 +1212,7 @@ function renderMeetingSections(meeting, tpl) {
         .map(x => x.getAttribute("data-target-group"));
       const expandedTargets = expandTargets(selectedPeople, selectedGroups);
 
-      const secDef = (tpl.sections || []).find(s => s.key === sectionKey);
+      const secDef = (tpl?.sections || []).find(s => s.key === sectionKey);
       const req = new Set(secDef?.requires || []);
       const errs = [];
 
@@ -1252,6 +1279,7 @@ function renderItemCard(it) {
   const requires = new Set(secDef?.requires || []);
   const ownerRequired = requires.has("ownerId");
   const statusRequired = requires.has("status");
+  const sectionLabel = secDef?.label || it.section;
 
   const people = alive(db.people).sort((a,b)=>a.name.localeCompare(b.name));
 
@@ -1284,7 +1312,7 @@ function renderItemCard(it) {
       <div class="item item--editing" data-item="${escapeHtml(it.id)}" data-editing="true">
         <div class="item__top">
           <div class="badges">
-            <span class="badge badge--accent">${escapeHtml(it.section)}</span>
+            <span class="badge badge--accent">${escapeHtml(sectionLabel)}</span>
             ${status ? `<span class="badge ${statusBadge}">${escapeHtml(status.replace("_"," "))}</span>` : ""}
             ${it.dueDate ? `<span class="badge">${escapeHtml(it.dueDate)}</span>` : ""}
             ${updBadge}
@@ -1346,7 +1374,7 @@ function renderItemCard(it) {
     <div class="item" data-item="${escapeHtml(it.id)}">
       <div class="item__top">
         <div class="badges">
-          <span class="badge badge--accent">${escapeHtml(it.section)}</span>
+          <span class="badge badge--accent">${escapeHtml(sectionLabel)}</span>
           ${status ? `<span class="badge ${statusBadge}">${escapeHtml(status.replace("_"," "))}</span>` : ""}
           ${it.dueDate ? `<span class="badge">${escapeHtml(it.dueDate)}</span>` : ""}
           ${updBadge}
