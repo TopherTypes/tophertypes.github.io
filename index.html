@@ -29,6 +29,7 @@
   <main class="layout">
     <nav class="tabs">
       <button class="tab is-active" data-tab="meeting">Meeting</button>
+      <button class="tab" data-tab="people">People</button>
       <button class="tab" data-tab="updates">Updates</button>
       <button class="tab" data-tab="actions">My Actions</button>
       <button class="tab" data-tab="topics">Topics</button>
@@ -172,6 +173,43 @@
       </div>
     </section>
 
+    <section class="panel" id="tab_people">
+      <div class="grid2">
+        <div class="card">
+          <div class="row row--space">
+            <h2>People</h2>
+            <button class="btn btn--primary" id="person_new_btn">New person</button>
+          </div>
+          <div id="people_list" class="list"></div>
+        </div>
+
+        <div class="card">
+          <div class="row row--space">
+            <h2>Person details</h2>
+            <div class="row">
+              <button class="btn btn--ghost" id="person_cancel_btn">Cancel</button>
+              <button class="btn btn--primary" id="person_save_btn">Save</button>
+            </div>
+          </div>
+          <div id="person_editor"></div>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div class="card">
+          <h2>Owned updates</h2>
+          <div class="muted">Items where this person is the owner.</div>
+          <div id="person_owned_updates" class="list"></div>
+        </div>
+
+        <div class="card">
+          <h2>Needs updates</h2>
+          <div class="muted">Items where this person is an update target.</div>
+          <div id="person_target_updates" class="list"></div>
+        </div>
+      </div>
+    </section>
+
     <section class="panel" id="tab_actions">
       <div class="card">
         <h2>My Actions</h2>
@@ -255,15 +293,6 @@
 
     <section class="panel" id="tab_settings">
       <div class="grid2">
-        <div class="card">
-          <h2>People</h2>
-          <div class="row">
-            <input id="new_person_name" type="text" placeholder="Add a person…" />
-            <button class="btn btn--primary" id="add_person_btn">Add</button>
-          </div>
-          <div id="people_list" class="list"></div>
-        </div>
-
         <div class="card">
           <h2>Groups</h2>
           <div class="row">

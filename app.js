@@ -38,6 +38,8 @@ let hasUnsyncedChanges = false;
 let lastSyncAt = null;
 let lastRemoteModifiedTime = null;
 const itemEditState = new Map();
+let personViewId = null;
+let personEditorState = { isNew: false, draft: null, error: "" };
 
 /* ================================
    UTIL
@@ -137,6 +139,25 @@ function ensurePeopleEmptyState(listEl) {
   } else if (hasSelected && empty) {
     empty.remove();
   }
+}
+
+function createPersonDraft(person) {
+  return {
+    name: person?.name || "",
+    email: person?.email || "",
+    organisation: person?.organisation || "",
+    jobTitle: person?.jobTitle || "",
+  };
+}
+
+function validatePersonDraft(draft, personId = null) {
+  const errs = [];
+  if (!draft.name.trim()) errs.push("Name is required.");
+  if (!draft.email.trim()) errs.push("Email is required.");
+  if (!draft.organisation.trim()) errs.push("Organisation is required.");
+  const nameExists = alive(db.people).some(p => p.id !== personId && p.name.toLowerCase() === draft.name.trim().toLowerCase());
+  if (nameExists) errs.push("Name must be unique.");
+  return errs;
 }
 
 function wirePeoplePickers(container, people) {
@@ -854,7 +875,7 @@ function ensureTopic(name) {
 function ensurePerson(name) {
   const existing = alive(db.people).find(p => p.name.toLowerCase() === name.toLowerCase());
   if (existing) return existing.id;
-  const p = { id: uid("person"), name, updatedAt: nowIso() };
+  const p = { id: uid("person"), name, email: "", organisation: "", jobTitle: "", updatedAt: nowIso() };
   db.people.push(p);
   return p.id;
 }
@@ -945,26 +966,61 @@ function renderTopics() {
   renderSelectOptions(topicsSel, opts, { placeholder: topics.length ? "Choose a topic…" : "No topics yet" });
 }
 
-function renderPeople() {
-  const list = byId("people_list");
+function renderPeopleSelects() {
   const updatesSel = byId("updates_person");
-
+  if (!updatesSel) return;
   const people = alive(db.people).sort((a,b)=>a.name.localeCompare(b.name));
   renderSelectOptions(updatesSel, people.map(p => ({ value:p.id, label:p.name })), { placeholder: people.length ? "Choose a person…" : "No people yet" });
+}
 
-  list.innerHTML = people.map(p => `
-    <div class="item">
-      <div class="item__top">
-        <div><strong>${escapeHtml(p.name)}</strong></div>
-        <div class="badges"><span class="badge">${escapeHtml(p.id)}</span></div>
-      </div>
-      <div class="item__actions">
-        <button class="smallbtn smallbtn--danger" data-del-person="${escapeHtml(p.id)}">Delete</button>
-      </div>
-    </div>
-  `).join("");
+function renderPeopleManager() {
+  const list = byId("people_list");
+  const editor = byId("person_editor");
+  const ownedList = byId("person_owned_updates");
+  const targetList = byId("person_target_updates");
+  if (!list || !editor || !ownedList || !targetList) return;
 
-  // Wire delete buttons
+  const people = alive(db.people).sort((a,b)=>a.name.localeCompare(b.name));
+  if (!personEditorState.draft && personViewId) {
+    const selected = getPerson(personViewId);
+    if (selected) {
+      personEditorState = { isNew: false, draft: createPersonDraft(selected), error: "" };
+    }
+  }
+
+  list.innerHTML = people.map(p => {
+    const meta = [
+      p.email ? escapeHtml(p.email) : null,
+      p.organisation ? escapeHtml(p.organisation) : null,
+      p.jobTitle ? escapeHtml(p.jobTitle) : null,
+    ].filter(Boolean).join(" • ");
+    return `
+      <div class="item ${p.id === personViewId ? "item--selected" : ""}">
+        <div class="item__top">
+          <div>
+            <strong>${escapeHtml(p.name)}</strong>
+            <div class="muted">${meta || "No details added yet."}</div>
+          </div>
+          <div class="badges"><span class="badge">${escapeHtml(p.id)}</span></div>
+        </div>
+        <div class="item__actions">
+          <button class="smallbtn" data-person-select="${escapeHtml(p.id)}">View</button>
+          <button class="smallbtn smallbtn--danger" data-del-person="${escapeHtml(p.id)}">Delete</button>
+        </div>
+      </div>
+    `;
+  }).join("") || `<div class="muted">No people yet. Create one to get started.</div>`;
+
+  list.querySelectorAll("[data-person-select]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-person-select");
+      personViewId = id;
+      const person = getPerson(id);
+      personEditorState = { isNew: false, draft: createPersonDraft(person), error: "" };
+      renderPeopleManager();
+    });
+  });
+
   list.querySelectorAll("[data-del-person]").forEach(btn => {
     btn.addEventListener("click", async () => {
       const id = btn.getAttribute("data-del-person");
@@ -973,11 +1029,90 @@ function renderPeople() {
       if (!confirm(`Delete ${p.name}? This won’t erase history but removes them from lists.`)) return;
       p.deleted = true;
       p.updatedAt = nowIso();
+      if (personViewId === id) {
+        personViewId = null;
+        personEditorState = { isNew: false, draft: null, error: "" };
+      }
       markDirty();
       await saveLocal();
       renderAll();
     });
   });
+
+  if (!personEditorState.draft) {
+    editor.innerHTML = `<div class="muted">Select a person to view or edit their details.</div>`;
+    ownedList.innerHTML = `<div class="muted">Select a person to see owned updates.</div>`;
+    targetList.innerHTML = `<div class="muted">Select a person to see update targets.</div>`;
+    return;
+  }
+
+  const draft = personEditorState.draft;
+  editor.innerHTML = `
+    <div class="formrow">
+      <label>Name ${fieldTag(true)}</label>
+      <input id="person_name" type="text" value="${escapeHtml(draft.name)}" />
+    </div>
+    <div class="formrow">
+      <label>Email ${fieldTag(true)}</label>
+      <input id="person_email" type="email" value="${escapeHtml(draft.email)}" />
+    </div>
+    <div class="formrow">
+      <label>Organisation ${fieldTag(true)}</label>
+      <input id="person_org" type="text" value="${escapeHtml(draft.organisation)}" />
+    </div>
+    <div class="formrow">
+      <label>Job title ${fieldTag(false)}</label>
+      <input id="person_title" type="text" value="${escapeHtml(draft.jobTitle)}" />
+    </div>
+    ${personEditorState.error ? `<div class="item__error">${escapeHtml(personEditorState.error)}</div>` : ""}
+  `;
+
+  if (personEditorState.isNew) {
+    ownedList.innerHTML = `<div class="muted">Save the person to see owned updates.</div>`;
+    targetList.innerHTML = `<div class="muted">Save the person to see update targets.</div>`;
+    return;
+  }
+
+  const activePerson = personViewId ? getPerson(personViewId) : null;
+  const owned = activePerson ? alive(db.items).filter(it => it.ownerId === activePerson.id) : [];
+  owned.sort((a,b)=>Date.parse(b.updatedAt)-Date.parse(a.updatedAt));
+
+  const targetItems = activePerson
+    ? alive(db.items).filter(it => (it.updateTargets || []).includes(activePerson.id))
+    : [];
+  const pendingTargets = targetItems.filter(it => !it.updateStatus?.[activePerson.id]?.updated);
+  const completedTargets = targetItems.filter(it => it.updateStatus?.[activePerson.id]?.updated);
+  pendingTargets.sort((a,b)=>Date.parse(b.updatedAt)-Date.parse(a.updatedAt));
+  completedTargets.sort((a,b)=>Date.parse(b.updatedAt)-Date.parse(a.updatedAt));
+
+  ownedList.innerHTML = owned.map(it => renderItemCard(it)).join("") || `<div class="muted">No owned updates yet.</div>`;
+  targetList.innerHTML = `
+    <div class="sectioncard">
+      <div class="sectionhead">
+        <h3>Pending</h3>
+        <div class="muted">${pendingTargets.length} item(s)</div>
+      </div>
+      <div class="sectionbox sectionbox--compact">
+        <div class="list">
+          ${pendingTargets.map(it => renderItemCard(it)).join("") || `<div class="muted">Nothing pending.</div>`}
+        </div>
+      </div>
+    </div>
+    <div class="sectioncard">
+      <div class="sectionhead">
+        <h3>Updated</h3>
+        <div class="muted">${completedTargets.length} item(s)</div>
+      </div>
+      <div class="sectionbox sectionbox--compact">
+        <div class="list">
+          ${completedTargets.map(it => renderItemCard(it)).join("") || `<div class="muted">No updates marked yet.</div>`}
+        </div>
+      </div>
+    </div>
+  `;
+
+  wireItemButtons(ownedList);
+  wireItemButtons(targetList);
 }
 
 function getDefaultActionsOwnerId() {
@@ -1903,7 +2038,8 @@ function renderSearch() {
 function renderAll() {
   renderTemplates();
   renderTopics();
-  renderPeople();
+  renderPeopleSelects();
+  renderPeopleManager();
   renderGroups();
   renderActionsFiltersOptions();
   renderCurrentMeetingHeader();
@@ -2204,16 +2340,6 @@ function wireSearchControls() {
 }
 
 function wireSettingsControls() {
-  byId("add_person_btn").addEventListener("click", async () => {
-    const name = byId("new_person_name").value.trim();
-    if (!name) return;
-    ensurePerson(name);
-    byId("new_person_name").value = "";
-    markDirty();
-    await saveLocal();
-    renderAll();
-  });
-
   byId("add_group_btn").addEventListener("click", async () => {
     const name = byId("new_group_name").value.trim();
     if (!name) return;
@@ -2243,6 +2369,62 @@ function wireSettingsControls() {
   }, 200));
 }
 
+function wirePeopleControls() {
+  byId("person_new_btn").addEventListener("click", () => {
+    personViewId = null;
+    personEditorState = { isNew: true, draft: createPersonDraft(null), error: "" };
+    renderPeopleManager();
+  });
+
+  byId("person_cancel_btn").addEventListener("click", () => {
+    if (personViewId) {
+      const person = getPerson(personViewId);
+      personEditorState = { isNew: false, draft: createPersonDraft(person), error: "" };
+    } else {
+      personEditorState = { isNew: false, draft: null, error: "" };
+    }
+    renderPeopleManager();
+  });
+
+  byId("person_save_btn").addEventListener("click", async () => {
+    if (!personEditorState.draft) return;
+    const name = byId("person_name")?.value.trim() || "";
+    const email = byId("person_email")?.value.trim() || "";
+    const organisation = byId("person_org")?.value.trim() || "";
+    const jobTitle = byId("person_title")?.value.trim() || "";
+    const draft = { name, email, organisation, jobTitle };
+    const errs = validatePersonDraft(draft, personEditorState.isNew ? null : personViewId);
+    if (errs.length) {
+      personEditorState = { ...personEditorState, draft, error: errs.join(" ") };
+      renderPeopleManager();
+      return;
+    }
+
+    if (personEditorState.isNew) {
+      const person = {
+        id: uid("person"),
+        ...draft,
+        updatedAt: nowIso(),
+      };
+      db.people.push(person);
+      personViewId = person.id;
+    } else if (personViewId) {
+      const person = getPerson(personViewId);
+      if (!person) return;
+      person.name = draft.name;
+      person.email = draft.email;
+      person.organisation = draft.organisation;
+      person.jobTitle = draft.jobTitle;
+      person.updatedAt = nowIso();
+    }
+
+    personEditorState = { isNew: false, draft: createPersonDraft(getPerson(personViewId)), error: "" };
+    markDirty();
+    await saveLocal();
+    renderAll();
+  });
+}
+
 /* ================================
    INIT
 =================================== */
@@ -2257,6 +2439,7 @@ async function init() {
   wireTopicControls();
   wireSearchControls();
   wireSettingsControls();
+  wirePeopleControls();
 
   // buttons disabled until APIs ready
   byId("auth_btn").disabled = true;
