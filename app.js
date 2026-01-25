@@ -27,6 +27,8 @@ let driveReady = false;
 let db = null;            // in-memory working DB
 let currentMeetingId = null;
 let actionsFilters = { ownerId: null, topicId: "", status: "" };
+let meetingCalendarView = "week";
+let meetingCalendarAnchor = new Date();
 
 let syncInProgress = false;
 let hasUnsyncedChanges = false;
@@ -83,6 +85,13 @@ function fmtDateTime(iso) {
   return d.toLocaleString(undefined, { year:"numeric", month:"short", day:"2-digit", hour:"2-digit", minute:"2-digit" });
 }
 
+function fmtDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(undefined, { year:"numeric", month:"short", day:"2-digit" });
+}
+
 function promptNonEmpty(label, placeholder="") {
   const v = prompt(label, placeholder);
   if (v === null) return null;
@@ -100,6 +109,45 @@ function debounce(fn, delay=200) {
     clearTimeout(t);
     t = setTimeout(() => fn(...args), delay);
   };
+}
+
+function normalizeDate(d) {
+  const out = new Date(d);
+  out.setHours(0, 0, 0, 0);
+  return out;
+}
+
+function dateKeyFromDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function dateKeyFromIso(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return dateKeyFromDate(d);
+}
+
+function addDays(date, days) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function startOfWeek(date) {
+  const d = normalizeDate(date);
+  const day = (d.getDay() + 6) % 7; // Monday = 0
+  return addDays(d, -day);
+}
+
+function startOfMonth(date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function formatTime(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
 /* ================================
@@ -524,6 +572,11 @@ async function loadLocal() {
       topicId: meta.actionsFilters?.topicId || "",
       status: meta.actionsFilters?.status || "",
     };
+    meetingCalendarView = meta.meetingCalendarView || "week";
+    meetingCalendarAnchor = meta.meetingCalendarAnchor ? new Date(meta.meetingCalendarAnchor) : new Date();
+    if (Number.isNaN(meetingCalendarAnchor.getTime())) {
+      meetingCalendarAnchor = new Date();
+    }
   } else {
     await saveMeta();
   }
@@ -541,7 +594,9 @@ async function saveMeta() {
     hasUnsyncedChanges,
     lastSyncAt,
     lastRemoteModifiedTime,
-    actionsFilters
+    actionsFilters,
+    meetingCalendarView,
+    meetingCalendarAnchor: meetingCalendarAnchor?.toISOString?.() || nowIso()
   });
   updateAuthUi();
 }
@@ -1368,6 +1423,116 @@ function renderQuickSearch() {
   wireItemButtons(out);
 }
 
+function renderMeetingCalendar() {
+  const calendar = byId("meeting_calendar");
+  const rangeEl = byId("calendar_range");
+  if (!calendar || !rangeEl) return;
+
+  const view = meetingCalendarView || "week";
+  const anchor = meetingCalendarAnchor || new Date();
+
+  document.querySelectorAll("[data-calendar-view]").forEach(btn => {
+    btn.classList.toggle("is-active", btn.getAttribute("data-calendar-view") === view);
+  });
+
+  const meetings = alive(db.meetings)
+    .filter(m => m.datetime)
+    .sort((a,b)=>Date.parse(a.datetime)-Date.parse(b.datetime));
+
+  const meetingsByDay = new Map();
+  meetings.forEach(m => {
+    const key = dateKeyFromIso(m.datetime);
+    if (!key) return;
+    if (!meetingsByDay.has(key)) meetingsByDay.set(key, []);
+    meetingsByDay.get(key).push(m);
+  });
+
+  meetingsByDay.forEach(list => {
+    list.sort((a,b)=>Date.parse(a.datetime)-Date.parse(b.datetime));
+  });
+
+  const weekdayFormatter = new Intl.DateTimeFormat(undefined, { weekday: "short" });
+  const dayFormatter = new Intl.DateTimeFormat(undefined, { day: "numeric" });
+  const monthFormatter = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" });
+  const rangeFormatter = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+
+  const renderDay = (d, isOutside = false) => {
+    const key = dateKeyFromDate(d);
+    const items = meetingsByDay.get(key) || [];
+    const list = items.map(m => {
+      const topic = getTopic(m.topicId)?.name || "No topic";
+      const title = m.title || "Untitled meeting";
+      const time = formatTime(m.datetime) || "Time TBD";
+      return `
+        <div class="calendar-meeting" data-open-meeting="${escapeHtml(m.id)}">
+          <div class="calendar-meeting__title">${escapeHtml(title)}</div>
+          <div class="calendar-meeting__meta">${escapeHtml(topic)} • ${escapeHtml(time)}</div>
+        </div>
+      `;
+    }).join("");
+
+    return `
+      <div class="calendar-day ${isOutside ? "is-outside" : ""}">
+        <div class="calendar-day__header">
+          <span>${weekdayFormatter.format(d)}</span>
+          <span class="calendar-day__date">${dayFormatter.format(d)}</span>
+        </div>
+        ${list || `<div class="calendar-day__empty">No meetings</div>`}
+      </div>
+    `;
+  };
+
+  if (view === "month") {
+    const monthStart = startOfMonth(anchor);
+    const gridStart = addDays(monthStart, -monthStart.getDay());
+    const days = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
+    rangeEl.textContent = monthFormatter.format(monthStart);
+    calendar.innerHTML = `
+      <div class="calendar-grid calendar-grid--month">
+        ${days.map(d => renderDay(d, d.getMonth() !== monthStart.getMonth())).join("")}
+      </div>
+    `;
+  } else {
+    const weekStart = startOfWeek(anchor);
+    const days = Array.from({ length: 5 }, (_, i) => addDays(weekStart, i));
+    const startLabel = rangeFormatter.format(days[0]);
+    const endLabel = rangeFormatter.format(days[days.length - 1]);
+    rangeEl.textContent = `Week of ${startLabel} – ${endLabel}`;
+    calendar.innerHTML = `
+      <div class="calendar-grid calendar-grid--week">
+        ${days.map(d => renderDay(d)).join("")}
+      </div>
+    `;
+  }
+
+  wireItemButtons(calendar);
+}
+
+function setMeetingCalendarView(view) {
+  meetingCalendarView = view;
+  saveMeta().catch(console.error);
+  renderMeetingCalendar();
+}
+
+function shiftMeetingCalendar(direction) {
+  if (meetingCalendarView === "month") {
+    const anchor = new Date(meetingCalendarAnchor);
+    anchor.setDate(1);
+    anchor.setMonth(anchor.getMonth() + direction);
+    meetingCalendarAnchor = anchor;
+  } else {
+    meetingCalendarAnchor = addDays(meetingCalendarAnchor, direction * 7);
+  }
+  saveMeta().catch(console.error);
+  renderMeetingCalendar();
+}
+
+function resetMeetingCalendarToToday() {
+  meetingCalendarAnchor = new Date();
+  saveMeta().catch(console.error);
+  renderMeetingCalendar();
+}
+
 function renderUpdates() {
   const personId = byId("updates_person").value || "";
   const filter = byId("updates_filter").value.trim().toLowerCase();
@@ -1537,6 +1702,7 @@ function renderAll() {
   renderTopicOverview();
   renderSearch();
   renderQuickSearch();
+  renderMeetingCalendar();
 
   const defaultOwnerInput = byId("default_owner_name");
   if (defaultOwnerInput && document.activeElement !== defaultOwnerInput) {
@@ -1764,6 +1930,23 @@ function wireMeetingControls() {
   });
 
   byId("quick_search").addEventListener("input", debounce(renderQuickSearch, 150));
+
+  document.querySelectorAll("[data-calendar-view]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const view = btn.getAttribute("data-calendar-view");
+      if (!view) return;
+      setMeetingCalendarView(view);
+    });
+  });
+
+  document.querySelectorAll("[data-calendar-nav]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const action = btn.getAttribute("data-calendar-nav");
+      if (action === "prev") shiftMeetingCalendar(-1);
+      if (action === "next") shiftMeetingCalendar(1);
+      if (action === "today") resetMeetingCalendarToToday();
+    });
+  });
 }
 
 function wireUpdatesControls() {

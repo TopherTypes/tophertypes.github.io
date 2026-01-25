@@ -92,6 +92,28 @@
         </div>
       </div>
 
+      <div class="card meeting-calendar">
+        <div class="calendar-header">
+          <div>
+            <h2>Meeting calendar</h2>
+            <div class="muted">Scan every scheduled meeting by date, topic, and time.</div>
+          </div>
+          <div class="calendar-controls">
+            <div class="segmented" role="tablist" aria-label="Calendar view">
+              <button class="segmented__btn is-active" type="button" data-calendar-view="week">Week</button>
+              <button class="segmented__btn" type="button" data-calendar-view="month">Month</button>
+            </div>
+            <div class="calendar-nav">
+              <button class="btn btn--ghost" type="button" data-calendar-nav="prev">◀</button>
+              <button class="btn btn--ghost" type="button" data-calendar-nav="today">Today</button>
+              <button class="btn btn--ghost" type="button" data-calendar-nav="next">▶</button>
+            </div>
+          </div>
+        </div>
+        <div class="calendar-range muted" id="calendar_range"></div>
+        <div id="meeting_calendar"></div>
+      </div>
+
       <div class="card" id="meeting_work_area">
         <h2>Meeting notes</h2>
         <div class="muted">Create or open a meeting to start taking notes.</div>
