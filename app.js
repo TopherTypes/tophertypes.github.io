@@ -79,6 +79,87 @@ function escapeHtml(s){
   }[c]));
 }
 
+function fieldTag(required) {
+  return required
+    ? `<span class="field-tag field-tag--required">Required</span>`
+    : `<span class="field-tag field-tag--optional">Optional</span>`;
+}
+
+function findPersonByName(name, people = alive(db?.people || [])) {
+  const needle = name.trim().toLowerCase();
+  if (!needle) return null;
+  return (people || []).find(p => p.name.toLowerCase() === needle) || null;
+}
+
+function ensurePeopleEmptyState(listEl) {
+  if (!listEl) return;
+  const hasSelected = listEl.querySelector("[data-selected-person]");
+  const empty = listEl.querySelector("[data-empty]");
+  if (!hasSelected && !empty) {
+    const msg = document.createElement("div");
+    msg.className = "muted";
+    msg.setAttribute("data-empty", "true");
+    msg.textContent = "No people selected yet.";
+    listEl.appendChild(msg);
+  } else if (hasSelected && empty) {
+    empty.remove();
+  }
+}
+
+function wirePeoplePickers(container, people) {
+  const peopleMap = new Map(people.map(p => [p.name.toLowerCase(), p]));
+  container.querySelectorAll("[data-people-picker]").forEach(picker => {
+    const input = picker.querySelector("[data-people-input]");
+    const addBtn = picker.querySelector("[data-add-person]");
+    const list = picker.querySelector("[data-selected-list]");
+    ensurePeopleEmptyState(list);
+
+    const addPersonFromInput = () => {
+      const value = input?.value.trim() || "";
+      if (!value) return;
+      const person = peopleMap.get(value.toLowerCase());
+      if (!person) {
+        alert("Choose a person from the list.");
+        return;
+      }
+      if (list?.querySelector(`[data-selected-person="${person.id}"]`)) {
+        input.value = "";
+        return;
+      }
+      const pill = document.createElement("span");
+      pill.className = "person-pill";
+      pill.setAttribute("data-selected-person", person.id);
+
+      const name = document.createElement("span");
+      name.textContent = person.name;
+
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "person-pill__remove";
+      removeBtn.setAttribute("aria-label", `Remove ${person.name}`);
+      removeBtn.textContent = "×";
+      removeBtn.addEventListener("click", () => {
+        pill.remove();
+        ensurePeopleEmptyState(list);
+      });
+
+      pill.appendChild(name);
+      pill.appendChild(removeBtn);
+      list.appendChild(pill);
+      input.value = "";
+      ensurePeopleEmptyState(list);
+    };
+
+    addBtn?.addEventListener("click", addPersonFromInput);
+    input?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        addPersonFromInput();
+      }
+    });
+  });
+}
+
 function fmtDateTime(iso) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -978,6 +1059,7 @@ function renderMeetingSections(meeting, tpl) {
     const ownerRequired = requires.has("ownerId");
     const statusRequired = requires.has("status");
     const targetsRequired = requires.has("updateTargets");
+    const peopleDatalist = people.map(p => `<option value="${escapeHtml(p.name)}"></option>`).join("");
 
     return `
       <section class="sectioncard">
@@ -986,25 +1068,25 @@ function renderMeetingSections(meeting, tpl) {
           <div class="muted">Section key: <span class="kbd">${escapeHtml(sec.key)}</span></div>
         </div>
 
-        <div class="sectionbox sectionbox--compact" data-section="${escapeHtml(sec.key)}">
+        <div class="sectionbox sectionbox--compact field-table" data-section="${escapeHtml(sec.key)}">
         <div class="grid2">
           <div>
             <div class="formrow">
-              <label>Text</label>
+              <label>Text ${fieldTag(true)}</label>
               <textarea data-field="text" placeholder="Type quickly…"></textarea>
             </div>
 
             <div class="grid2">
               <div class="formrow">
-                <label>Owner ${ownerRequired ? "(required)" : "(optional)"}</label>
-                <select data-field="ownerId">
-                  <option value="">— None —</option>
-                  ${people.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join("")}
-                </select>
+                <label>Owner ${fieldTag(ownerRequired)}</label>
+                <input data-field="ownerName" list="owner_list_${escapeHtml(sec.key)}" type="text" placeholder="Type to search…" ${people.length ? "" : "disabled"} />
+                <datalist id="owner_list_${escapeHtml(sec.key)}">
+                  ${peopleDatalist}
+                </datalist>
               </div>
 
               <div class="formrow">
-                <label>Status ${statusRequired ? "(required)" : "(optional)"}</label>
+                <label>Status ${fieldTag(statusRequired)}</label>
                 <select data-field="status">
                   <option value="">— None —</option>
                   <option value="open">Open</option>
@@ -1017,12 +1099,12 @@ function renderMeetingSections(meeting, tpl) {
 
             <div class="grid2">
               <div class="formrow">
-                <label>Due date (optional)</label>
+                <label>Due date ${fieldTag(false)}</label>
                 <input data-field="dueDate" type="date" />
               </div>
 
               <div class="formrow">
-                <label>Link (optional)</label>
+                <label>Link ${fieldTag(false)}</label>
                 <input data-field="link" type="url" placeholder="https://…" />
               </div>
             </div>
@@ -1030,17 +1112,21 @@ function renderMeetingSections(meeting, tpl) {
 
           <div>
             <div class="formrow">
-              <label>People to update ${targetsRequired ? "(required)" : "(optional)"}</label>
+              <label>People to update ${fieldTag(targetsRequired)}</label>
               <div class="picker">
                 <div class="pickcol">
                   <h4>People</h4>
-                  <div class="picklist">
-                    ${people.length ? people.map(p => `
-                      <label class="checkline">
-                        <input type="checkbox" data-target-person="${escapeHtml(p.id)}" />
-                        ${escapeHtml(p.name)}
-                      </label>
-                    `).join("") : `<div class="muted">Add people in Settings first.</div>`}
+                  <div class="people-select" data-people-picker>
+                    <div class="people-select__controls">
+                      <input data-people-input type="text" list="people_list_${escapeHtml(sec.key)}" placeholder="Type a name to add…" ${people.length ? "" : "disabled"} />
+                      <datalist id="people_list_${escapeHtml(sec.key)}">
+                        ${peopleDatalist}
+                      </datalist>
+                      <button class="btn btn--ghost" type="button" data-add-person ${people.length ? "" : "disabled"}>Add</button>
+                    </div>
+                    <div class="people-select__selected" data-selected-list>
+                      <div class="muted" data-empty="true">No people selected yet.</div>
+                    </div>
                   </div>
                 </div>
                 <div class="pickcol">
@@ -1077,20 +1163,24 @@ function renderMeetingSections(meeting, tpl) {
     </div>
   `;
 
+  wirePeoplePickers(container, people);
+
   // wire add buttons & item actions
   container.querySelectorAll("[data-add-item]").forEach(btn => {
     btn.addEventListener("click", async () => {
       const sectionKey = btn.getAttribute("data-add-item");
       const box = btn.closest(".sectionbox");
       const text = box.querySelector("textarea[data-field=text]").value.trim();
-      const ownerId = box.querySelector("select[data-field=ownerId]").value || null;
+      const ownerName = box.querySelector("input[data-field=ownerName]")?.value.trim() || "";
+      const ownerMatch = ownerName ? findPersonByName(ownerName, people) : null;
+      const ownerId = ownerMatch ? ownerMatch.id : null;
       const status = box.querySelector("select[data-field=status]").value || null;
       const dueDate = box.querySelector("input[data-field=dueDate]").value || null;
       const link = box.querySelector("input[data-field=link]").value.trim() || null;
 
       // selected targets
-      const selectedPeople = Array.from(box.querySelectorAll("input[data-target-person]:checked"))
-        .map(x => x.getAttribute("data-target-person"));
+      const selectedPeople = Array.from(box.querySelectorAll("[data-selected-person]"))
+        .map(x => x.getAttribute("data-selected-person"));
       const selectedGroups = Array.from(box.querySelectorAll("input[data-target-group]:checked"))
         .map(x => x.getAttribute("data-target-group"));
       const expandedTargets = expandTargets(selectedPeople, selectedGroups);
@@ -1100,6 +1190,7 @@ function renderMeetingSections(meeting, tpl) {
       const errs = [];
 
       if (!text) errs.push("Text is required.");
+      if (ownerName && !ownerMatch) errs.push("Owner must match a person from the list.");
       if (req.has("ownerId") && !ownerId) errs.push("Owner is required for this section.");
       if (req.has("status") && !status) errs.push("Status is required for this section.");
       if (req.has("updateTargets") && expandedTargets.length === 0) errs.push("At least one update target is required for this section.");
@@ -1135,11 +1226,13 @@ function renderMeetingSections(meeting, tpl) {
 
       // clear inputs
       box.querySelector("textarea[data-field=text]").value = "";
-      box.querySelector("select[data-field=ownerId]").value = "";
+      box.querySelector("input[data-field=ownerName]").value = "";
       box.querySelector("select[data-field=status]").value = "";
       box.querySelector("input[data-field=dueDate]").value = "";
       box.querySelector("input[data-field=link]").value = "";
       box.querySelectorAll("input[type=checkbox]").forEach(c => c.checked = false);
+      box.querySelectorAll("[data-selected-person]").forEach(pill => pill.remove());
+      box.querySelectorAll("[data-selected-list]").forEach(list => ensurePeopleEmptyState(list));
 
       renderAll();
     });
@@ -1167,7 +1260,7 @@ function renderItemCard(it) {
     status: it.status || "",
     dueDate: it.dueDate || "",
     link: it.link || "",
-    ownerId: it.ownerId || "",
+    ownerName: owner?.name || "",
   };
   const editError = editState?.error || "";
 
@@ -1202,23 +1295,21 @@ function renderItemCard(it) {
 
         <div class="item__edit">
           <div class="formrow">
-            <label>Text</label>
+            <label>Text ${fieldTag(true)}</label>
             <textarea data-edit-field="text" placeholder="Update text…">${escapeHtml(draft.text)}</textarea>
           </div>
 
           <div class="grid2">
             <div class="formrow">
-              <label>Owner ${ownerRequired ? "(required)" : "(optional)"}</label>
-              <select data-edit-field="ownerId">
-                <option value="">— None —</option>
-                ${people.map(p => `
-                  <option value="${escapeHtml(p.id)}"${draft.ownerId === p.id ? " selected" : ""}>${escapeHtml(p.name)}</option>
-                `).join("")}
-              </select>
+              <label>Owner ${fieldTag(ownerRequired)}</label>
+              <input data-edit-field="ownerName" list="owner_edit_${escapeHtml(it.id)}" type="text" placeholder="Type to search…" value="${escapeHtml(draft.ownerName)}" ${people.length ? "" : "disabled"} />
+              <datalist id="owner_edit_${escapeHtml(it.id)}">
+                ${people.map(p => `<option value="${escapeHtml(p.name)}"></option>`).join("")}
+              </datalist>
             </div>
 
             <div class="formrow">
-              <label>Status ${statusRequired ? "(required)" : "(optional)"}</label>
+              <label>Status ${fieldTag(statusRequired)}</label>
               <select data-edit-field="status">
                 <option value="">— None —</option>
                 <option value="open"${draft.status === "open" ? " selected" : ""}>Open</option>
@@ -1231,12 +1322,12 @@ function renderItemCard(it) {
 
           <div class="grid2">
             <div class="formrow">
-              <label>Due date (optional)</label>
+              <label>Due date ${fieldTag(false)}</label>
               <input data-edit-field="dueDate" type="date" value="${escapeHtml(draft.dueDate)}" />
             </div>
 
             <div class="formrow">
-              <label>Link (optional)</label>
+              <label>Link ${fieldTag(false)}</label>
               <input data-edit-field="link" type="url" placeholder="https://…" value="${escapeHtml(draft.link)}" />
             </div>
           </div>
@@ -1294,7 +1385,7 @@ function wireItemButtons(rootEl) {
           status: it.status || "",
           dueDate: it.dueDate || "",
           link: it.link || "",
-          ownerId: it.ownerId || "",
+          ownerName: getPerson(it.ownerId)?.name || "",
         },
         error: "",
       });
@@ -1311,7 +1402,9 @@ function wireItemButtons(rootEl) {
       if (!card) return;
 
       const text = card.querySelector("[data-edit-field=text]")?.value.trim() || "";
-      const ownerId = card.querySelector("[data-edit-field=ownerId]")?.value || null;
+      const ownerName = card.querySelector("[data-edit-field=ownerName]")?.value.trim() || "";
+      const ownerMatch = ownerName ? findPersonByName(ownerName) : null;
+      const ownerId = ownerMatch ? ownerMatch.id : null;
       const status = card.querySelector("[data-edit-field=status]")?.value || null;
       const dueDate = card.querySelector("[data-edit-field=dueDate]")?.value || null;
       const link = card.querySelector("[data-edit-field=link]")?.value.trim() || null;
@@ -1323,6 +1416,7 @@ function wireItemButtons(rootEl) {
       const errs = [];
 
       if (!text) errs.push("Text is required.");
+      if (ownerName && !ownerMatch) errs.push("Owner must match a person from the list.");
       if (req.has("ownerId") && !ownerId) errs.push("Owner is required for this section.");
       if (req.has("status") && !status) errs.push("Status is required for this section.");
       if (req.has("updateTargets") && (it.updateTargets || []).length === 0) {
@@ -1336,7 +1430,7 @@ function wireItemButtons(rootEl) {
             status: status || "",
             dueDate: dueDate || "",
             link: link || "",
-            ownerId: ownerId || "",
+            ownerName: ownerName || "",
           },
           error: errs.join(" "),
         });
