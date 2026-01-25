@@ -21,7 +21,10 @@ body{
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
   background: radial-gradient(1200px 600px at 10% 0%, rgba(106,169,255,0.15), transparent 50%),
               radial-gradient(1200px 600px at 90% 0%, rgba(140,255,208,0.10), transparent 55%),
+              linear-gradient(180deg, rgba(11,14,20,0.9) 0%, rgba(11,14,20,1) 45%, rgba(11,14,20,1) 100%),
               var(--bg);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
   color:var(--text);
 }
 
