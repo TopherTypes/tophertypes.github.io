@@ -2791,7 +2791,11 @@ function wireSearchControls() {
   byId("search_type").addEventListener("change", renderSearch);
 }
 
-function wireSettingsControls() {
+/**
+ * Wires group creation controls housed in the People module.
+ * Keeps group management near people records for easier maintenance.
+ */
+function wireGroupControls() {
   const addGroupBtn = byId("add_group_btn");
   if (addGroupBtn) {
     addGroupBtn.addEventListener("click", async () => {
@@ -2805,7 +2809,9 @@ function wireSettingsControls() {
       renderAll();
     });
   }
+}
 
+function wireSettingsControls() {
   const downloadJsonBtn = byId("download_json_btn");
   if (downloadJsonBtn) {
     downloadJsonBtn.addEventListener("click", downloadJsonBackup);
@@ -2903,6 +2909,7 @@ async function init() {
   wireActionsControls();
   wireTopicControls();
   wireSearchControls();
+  wireGroupControls();
   wireSettingsControls();
   wirePeopleControls();
   wireTasksControls();
