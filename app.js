@@ -297,6 +297,7 @@ function makeDefaultDb() {
     updatedAt: nowIso(),
     settings: {
       defaultOwnerName: "",
+      scratchpadDraft: "",
       updatedAt: nowIso(),
     },
     templates: createBuiltinTemplates(),
@@ -1237,7 +1238,26 @@ function renderCurrentMeetingHeader() {
   const meeting = currentMeetingId ? getMeeting(currentMeetingId) : null;
   if (!meeting) {
     label.textContent = "None selected.";
-    area.innerHTML = `<h2>Meeting notes</h2><div class="muted">Create or open a meeting to start taking notes.</div>`;
+    area.innerHTML = `
+      <h2>Meeting notes</h2>
+      <div class="muted">Create or open a meeting to start taking notes.</div>
+      <div class="sectioncard scratchpad-card">
+        <div class="sectionhead">
+          <h3>Meeting scratchpad</h3>
+          <div class="muted">Draft notes are saved locally until you open a meeting.</div>
+        </div>
+        <div
+          class="scratchpad-field"
+          data-scratchpad
+          data-scratchpad-mode="draft"
+          contenteditable="true"
+          role="textbox"
+          aria-multiline="true"
+          data-placeholder="Type meeting notes here..."
+        ></div>
+      </div>
+    `;
+    wireMeetingScratchpad(null);
     return;
   }
 
@@ -1252,10 +1272,65 @@ function renderCurrentMeetingHeader() {
   area.innerHTML = `
     <h2>Meeting notes</h2>
     <div class="muted">Template: <strong>${escapeHtml(tpl?.name || "")}</strong> • Topic: <strong>${escapeHtml(topic?.name || "")}</strong></div>
+    <div class="sectioncard scratchpad-card">
+      <div class="sectionhead">
+        <h3>Meeting scratchpad</h3>
+        <div class="muted">Capture rich text during the meeting, then move items into the structured sections below.</div>
+      </div>
+      <div
+        class="scratchpad-field"
+        data-scratchpad
+        data-scratchpad-mode="meeting"
+        contenteditable="true"
+        role="textbox"
+        aria-multiline="true"
+        data-placeholder="Type meeting notes here..."
+      ></div>
+    </div>
     <div id="sections_container"></div>
   `;
 
   renderMeetingSections(meeting, tpl);
+  wireMeetingScratchpad(meeting);
+}
+
+function wireMeetingScratchpad(meeting) {
+  const field = document.querySelector("[data-scratchpad]");
+  if (!field) return;
+  if (!meeting && db.settings?.scratchpadDraft) {
+    field.innerHTML = db.settings.scratchpadDraft;
+  } else if (meeting) {
+    if (!meeting.scratchpadHtml && db.settings?.scratchpadDraft) {
+      meeting.scratchpadHtml = db.settings.scratchpadDraft;
+      db.settings.scratchpadDraft = "";
+      db.settings.updatedAt = nowIso();
+      meeting.updatedAt = nowIso();
+      markDirty();
+      saveLocal();
+    }
+    field.innerHTML = meeting.scratchpadHtml || "";
+  }
+
+  const persistScratchpad = debounce(() => {
+    if (!meeting) {
+      db.settings = db.settings || { defaultOwnerName: "", scratchpadDraft: "", updatedAt: nowIso() };
+      db.settings.scratchpadDraft = field.innerHTML;
+      db.settings.updatedAt = nowIso();
+      markDirty();
+      saveLocal();
+      return;
+    }
+    if (!currentMeetingId || meeting.id !== currentMeetingId) return;
+    meeting.scratchpadHtml = field.innerHTML;
+    meeting.updatedAt = nowIso();
+    markDirty();
+    saveLocal();
+  }, 250);
+
+  field.addEventListener("input", persistScratchpad);
+  field.addEventListener("blur", () => {
+    persistScratchpad();
+  });
 }
 
 function renderMeetingSections(meeting, tpl) {
