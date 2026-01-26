@@ -326,9 +326,40 @@
         </div>
       </div>
 
-      <div class="grid2">
-        <div class="card">
-          <h2>Create task</h2>
+      <div class="card">
+        <div class="row row--space">
+          <div>
+            <h2>Tasks</h2>
+            <div class="muted">Sorted by due date, priority, and status.</div>
+          </div>
+          <div class="row">
+            <button class="btn btn--primary" id="task_open_modal_btn">Add task</button>
+            <select id="task_filter_status">
+              <option value="">All statuses</option>
+              <option value="todo">To do</option>
+              <option value="in_progress">In progress</option>
+              <option value="blocked">Blocked</option>
+              <option value="done">Done</option>
+            </select>
+            <select id="task_filter_priority">
+              <option value="">All priorities</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+          </div>
+        </div>
+        <div class="muted" id="tasks_count"></div>
+        <div id="tasks_list" class="list"></div>
+      </div>
+
+      <div class="lightbox" id="task_lightbox" aria-hidden="true">
+        <div class="lightbox__backdrop" data-lightbox-close="true"></div>
+        <div class="lightbox__panel" role="dialog" aria-modal="true" aria-labelledby="task_lightbox_title">
+          <div class="lightbox__header">
+            <h3 id="task_lightbox_title">Add a task</h3>
+            <button class="iconbtn" data-lightbox-close="true" aria-label="Close task form">✕</button>
+          </div>
           <div class="formrow">
             <label>Task title</label>
             <input id="task_title" type="text" placeholder="e.g., Review contract updates" />
@@ -362,31 +393,8 @@
           </div>
           <div class="row row--space">
             <button class="btn btn--primary" id="task_add_btn">Add task</button>
-            <button class="btn btn--ghost" id="task_clear_btn">Clear</button>
+            <button class="btn btn--ghost" id="task_clear_btn" type="button">Clear</button>
           </div>
-        </div>
-
-        <div class="card">
-          <div class="row row--space">
-            <h2>Tasks</h2>
-            <div class="row">
-              <select id="task_filter_status">
-                <option value="">All statuses</option>
-                <option value="todo">To do</option>
-                <option value="in_progress">In progress</option>
-                <option value="blocked">Blocked</option>
-                <option value="done">Done</option>
-              </select>
-              <select id="task_filter_priority">
-                <option value="">All priorities</option>
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-              </select>
-            </div>
-          </div>
-          <div class="muted" id="tasks_count"></div>
-          <div id="tasks_list" class="list"></div>
         </div>
       </div>
     </section>
