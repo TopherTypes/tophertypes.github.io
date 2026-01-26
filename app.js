@@ -42,6 +42,8 @@ let actionsFilters = { ownerId: null, topicId: "", status: "" };
 let meetingCalendarView = "week";
 let meetingCalendarAnchor = new Date();
 let meetingView = "setup";
+// Tracks the meeting currently being edited in the lightbox, if any.
+let meetingEditId = null;
 // Tracks top-level module selection for the modular UI shell.
 let activeModule = "meetings";
 // Tracks the active tab within the Meetings module.
@@ -187,6 +189,20 @@ function formatTaskDueDate(dueDate) {
   const parsed = new Date(`${dueDate}T00:00:00`);
   if (Number.isNaN(parsed.getTime())) return dueDate;
   return parsed.toLocaleDateString();
+}
+
+/**
+ * Formats an ISO timestamp for a datetime-local input value.
+ * @param {string} isoDate ISO-8601 date/time string.
+ * @returns {string} Localized value for datetime-local inputs.
+ */
+function toLocalDateTimeValue(isoDate) {
+  if (!isoDate) return "";
+  const parsed = new Date(isoDate);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60000)
+    .toISOString()
+    .slice(0, 16);
 }
 
 function createBuiltinTemplates() {
@@ -1928,6 +1944,27 @@ function wireItemButtons(rootEl) {
     });
   });
 
+  rootEl.querySelectorAll("[data-meeting-notes]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const mid = btn.getAttribute("data-meeting-notes");
+      const m = getMeeting(mid);
+      if (!m) return;
+      currentMeetingId = mid;
+      await saveMeta();
+      setMeetingView("notes");
+      setActiveModule("meetings");
+      setMeetingModuleTab("meeting");
+      renderAll();
+    });
+  });
+
+  rootEl.querySelectorAll("[data-meeting-edit]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const mid = btn.getAttribute("data-meeting-edit");
+      openMeetingEditLightbox(mid);
+    });
+  });
+
   rootEl.querySelectorAll("[data-open-link]").forEach(btn => {
     btn.addEventListener("click", () => {
       const id = btn.getAttribute("data-open-link");
@@ -1936,33 +1973,6 @@ function wireItemButtons(rootEl) {
       window.open(it.link, "_blank", "noopener,noreferrer");
     });
   });
-}
-
-function renderMeetingSelectDialog() {
-  const meetings = alive(db.meetings).sort((a,b)=>Date.parse(b.datetime)-Date.parse(a.datetime));
-  if (!meetings.length) {
-    alert("No meetings yet.");
-    return;
-  }
-  const options = meetings.slice(0, 30).map(m => {
-    const topic = getTopic(m.topicId)?.name || "No topic";
-    const title = m.title || "(Untitled)";
-    return `${m.id} :: ${fmtDateTime(m.datetime)} :: ${title} :: ${topic}`;
-  }).join("\n");
-
-  const chosen = prompt(
-    "Paste the meeting ID from the list below (or cancel):\n\n" + options,
-    meetings[0].id
-  );
-  if (!chosen) return;
-  const m = getMeeting(chosen.trim());
-  if (!m) {
-    alert("Meeting ID not found.");
-    return;
-  }
-  currentMeetingId = m.id;
-  setMeetingView("notes");
-  saveMeta().then(() => renderAll());
 }
 
 function renderQuickSearch() {
@@ -2022,9 +2032,13 @@ function renderMeetingCalendar() {
       const title = m.title || "Untitled meeting";
       const time = formatTime(m.datetime) || "Time TBD";
       return `
-        <div class="calendar-meeting" data-open-meeting="${escapeHtml(m.id)}">
+        <div class="calendar-meeting">
           <div class="calendar-meeting__title">${escapeHtml(title)}</div>
           <div class="calendar-meeting__meta">${escapeHtml(topic)} • ${escapeHtml(time)}</div>
+          <div class="calendar-meeting__actions">
+            <button class="smallbtn" type="button" data-meeting-edit="${escapeHtml(m.id)}">Edit</button>
+            <button class="smallbtn smallbtn--primary" type="button" data-meeting-notes="${escapeHtml(m.id)}">Notes</button>
+          </div>
         </div>
       `;
     }).join("");
@@ -2452,14 +2466,63 @@ function clearMeetingForm() {
   const titleInput = byId("meeting_title");
   const datetimeInput = byId("meeting_datetime");
   if (titleInput) titleInput.value = "";
-  if (datetimeInput) datetimeInput.value = "";
+  if (datetimeInput) {
+    datetimeInput.value = toLocalDateTimeValue(nowIso());
+  }
 }
 
 /**
  * Opens the meeting creation lightbox and resets draft-specific inputs.
  */
 function openMeetingLightbox() {
+  // Ensure the lightbox is reset to creation mode with a fresh draft.
+  meetingEditId = null;
+  setMeetingLightboxMode("create");
   clearMeetingForm();
+  openLightbox("meeting_lightbox", "meeting_title");
+}
+
+/**
+ * Updates the meeting lightbox title and primary button label by mode.
+ * @param {"create"|"edit"} mode Lightbox mode.
+ */
+function setMeetingLightboxMode(mode) {
+  const titleEl = byId("meeting_lightbox_title");
+  const actionBtn = byId("create_meeting_btn");
+  if (titleEl) {
+    titleEl.textContent = mode === "edit" ? "Edit meeting" : "Create a meeting";
+  }
+  if (actionBtn) {
+    actionBtn.textContent = mode === "edit" ? "Save changes" : "Create meeting";
+  }
+}
+
+/**
+ * Loads a meeting's details into the lightbox form controls.
+ * @param {object} meeting Meeting record to edit.
+ */
+function populateMeetingForm(meeting) {
+  const templateSelect = byId("meeting_template");
+  const topicSelect = byId("meeting_topic");
+  const titleInput = byId("meeting_title");
+  const datetimeInput = byId("meeting_datetime");
+
+  if (templateSelect) templateSelect.value = meeting.templateId || "";
+  if (topicSelect) topicSelect.value = meeting.topicId || "";
+  if (titleInput) titleInput.value = meeting.title || "";
+  if (datetimeInput) datetimeInput.value = toLocalDateTimeValue(meeting.datetime);
+}
+
+/**
+ * Opens the meeting lightbox in edit mode for the selected meeting.
+ * @param {string} meetingId Meeting identifier to edit.
+ */
+function openMeetingEditLightbox(meetingId) {
+  const meeting = getMeeting(meetingId);
+  if (!meeting) return;
+  meetingEditId = meeting.id;
+  setMeetingLightboxMode("edit");
+  populateMeetingForm(meeting);
   openLightbox("meeting_lightbox", "meeting_title");
 }
 
@@ -2651,7 +2714,7 @@ async function addTask() {
   renderTasks();
 }
 
-async function createMeeting() {
+async function saveMeetingFromLightbox() {
   const templateId = byId("meeting_template").value;
   const topicId = byId("meeting_topic").value || null;
 
@@ -2662,19 +2725,36 @@ async function createMeeting() {
   const dt = byId("meeting_datetime").value;
   const datetime = dt ? new Date(dt).toISOString() : nowIso();
 
-  const meeting = {
-    id: uid("meeting"),
-    templateId,
-    topicId,
-    title,
-    datetime,
-    createdAt: nowIso(),
-    updatedAt: nowIso(),
-  };
+  let meeting = null;
 
-  db.meetings.push(meeting);
+  if (meetingEditId) {
+    meeting = getMeeting(meetingEditId);
+    if (!meeting) {
+      alert("Meeting not found.");
+      meetingEditId = null;
+      return;
+    }
+    meeting.templateId = templateId;
+    meeting.topicId = topicId;
+    meeting.title = title;
+    meeting.datetime = datetime;
+    meeting.updatedAt = nowIso();
+  } else {
+    meeting = {
+      id: uid("meeting"),
+      templateId,
+      topicId,
+      title,
+      datetime,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    db.meetings.push(meeting);
+  }
+
   currentMeetingId = meeting.id;
   setMeetingView("notes");
+  meetingEditId = null;
   clearMeetingForm();
   closeLightbox("meeting_lightbox");
 
@@ -2901,8 +2981,7 @@ function wireTopButtons() {
 
 function wireMeetingControls() {
   byId("meeting_open_lightbox_btn")?.addEventListener("click", openMeetingLightbox);
-  byId("create_meeting_btn").addEventListener("click", createMeeting);
-  byId("open_meeting_btn").addEventListener("click", () => renderMeetingSelectDialog());
+  byId("create_meeting_btn").addEventListener("click", saveMeetingFromLightbox);
   byId("delete_meeting_btn").addEventListener("click", deleteCurrentMeeting);
   byId("download_meeting_summary_btn").addEventListener("click", copyMeetingSummary);
 

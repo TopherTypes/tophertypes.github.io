@@ -408,6 +408,11 @@ label{
   cursor:pointer;
 }
 .smallbtn:hover{border-color: rgba(124,155,255,0.4);}
+.smallbtn--primary{
+  background: linear-gradient(135deg, rgba(124,155,255,0.3), rgba(94,242,217,0.2));
+  border-color: rgba(124,155,255,0.5);
+  color: var(--text);
+}
 .smallbtn--danger{border-color: rgba(255,106,122,0.5); background: rgba(255,106,122,0.12);}
 
 /* Task list cards */
@@ -769,12 +774,21 @@ label{
   display:flex;
   flex-direction:column;
   gap:4px;
-  cursor:pointer;
   transition: transform 0.15s ease, border-color 0.15s ease;
 }
 .calendar-meeting:hover{
   transform: translateY(-1px);
   border-color: rgba(124,155,255,0.6);
+}
+.calendar-meeting__actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  margin-top:4px;
+}
+.calendar-meeting__actions .smallbtn{
+  padding:6px 10px;
+  font-size:11px;
 }
 .calendar-meeting__title{font-size:13px; font-weight:600;}
 .calendar-meeting__meta{font-size:11px; color: var(--muted);}
