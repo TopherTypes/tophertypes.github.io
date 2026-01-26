@@ -2681,11 +2681,16 @@ function openMeetingLightbox() {
 function setMeetingLightboxMode(mode) {
   const titleEl = byId("meeting_lightbox_title");
   const actionBtn = byId("create_meeting_btn");
+  const deleteBtn = byId("meeting_delete_btn");
   if (titleEl) {
     titleEl.textContent = mode === "edit" ? "Edit meeting" : "Create a meeting";
   }
   if (actionBtn) {
     actionBtn.textContent = mode === "edit" ? "Save changes" : "Create meeting";
+  }
+  if (deleteBtn) {
+    // Only show the destructive delete action when editing an existing meeting.
+    deleteBtn.hidden = mode !== "edit";
   }
 }
 
@@ -2978,28 +2983,62 @@ async function saveMeetingFromLightbox() {
   renderAll();
 }
 
-async function deleteCurrentMeeting() {
-  const m = currentMeetingId ? getMeeting(currentMeetingId) : null;
-  if (!m) return;
-  if (!confirm("Delete this meeting? Items will remain but become orphaned unless you delete them too.")) return;
+/**
+ * Deletes a meeting by id and optionally purges its items.
+ * @param {string} meetingId Meeting identifier to delete.
+ * @returns {Promise<boolean>} Whether a meeting was deleted.
+ */
+async function deleteMeetingById(meetingId) {
+  if (!meetingId) return false;
+  const meeting = getMeeting(meetingId);
+  if (!meeting) return false;
 
-  m.deleted = true;
-  m.updatedAt = nowIso();
+  const confirmDelete = confirm("Delete this meeting? Items will remain but become orphaned unless you delete them too.");
+  if (!confirmDelete) return false;
 
-  // Optionally also delete items for the meeting:
+  meeting.deleted = true;
+  meeting.updatedAt = nowIso();
+
+  // Optionally also delete items for the meeting to reduce orphaned records.
   if (confirm("Also delete all items from this meeting? (Recommended)")) {
-    for (const it of alive(db.items).filter(i => i.meetingId === m.id)) {
+    for (const it of alive(db.items).filter(i => i.meetingId === meeting.id)) {
       it.deleted = true;
       it.updatedAt = nowIso();
     }
   }
 
-  currentMeetingId = null;
+  if (currentMeetingId === meeting.id) {
+    currentMeetingId = null;
+  }
 
   markDirty();
   await saveLocal();
   await saveMeta();
   renderAll();
+  return true;
+}
+
+/**
+ * Deletes the currently open meeting in the Notes view.
+ */
+async function deleteCurrentMeeting() {
+  await deleteMeetingById(currentMeetingId);
+}
+
+/**
+ * Deletes the meeting currently loaded in the edit lightbox.
+ */
+async function deleteMeetingFromLightbox() {
+  if (!meetingEditId) {
+    alert("No meeting selected.");
+    return;
+  }
+  const deleted = await deleteMeetingById(meetingEditId);
+  if (!deleted) return;
+
+  meetingEditId = null;
+  clearMeetingForm();
+  closeLightbox("meeting_lightbox");
 }
 
 function buildMeetingSummary(meetingId) {
@@ -3203,6 +3242,8 @@ function wireMeetingControls() {
   byId("meeting_open_lightbox_btn")?.addEventListener("click", openMeetingLightbox);
   byId("create_meeting_btn").addEventListener("click", saveMeetingFromLightbox);
   byId("delete_meeting_btn").addEventListener("click", deleteCurrentMeeting);
+  // Delete the meeting directly from the edit lightbox.
+  byId("meeting_delete_btn")?.addEventListener("click", deleteMeetingFromLightbox);
   byId("download_meeting_summary_btn").addEventListener("click", copyMeetingSummary);
 
   byId("add_topic_btn").addEventListener("click", openTopicLightbox);
