@@ -61,10 +61,10 @@ body{
   background: rgba(255,255,255,0.03);
 }
 
-/* App layout and tabs */
+/* App layout and modules */
 .layout{max-width:100%; width:100%; margin:18px auto; padding:0 16px 60px;}
 
-.tabs{
+.module-tabs{
   display:flex;
   gap:10px;
   padding:10px;
@@ -74,7 +74,7 @@ body{
   box-shadow: var(--shadow);
 }
 
-.tab{
+.module-tab{
   border:1px solid transparent;
   background: transparent;
   color: var(--muted);
@@ -83,16 +83,54 @@ body{
   cursor:pointer;
   transition: all 0.15s ease;
 }
-.tab:hover{border-color: var(--border); color: var(--text);}
-.tab.is-active{
+.module-tab:hover{border-color: var(--border); color: var(--text);}
+.module-tab.is-active{
   background: rgba(106,169,255,0.15);
   border-color: rgba(106,169,255,0.35);
   color: var(--text);
 }
 
-/* Panel switcher */
-.panel{display:none; margin-top:16px;}
-.panel.is-active{display:block;}
+/* Module switcher */
+.module-panel{display:none; margin-top:16px;}
+.module-panel.is-active{display:block;}
+.module-section{display:none; margin-top:16px;}
+.module-section.is-active{display:block;}
+
+.module-header{
+  margin-top:16px;
+  padding:16px;
+  border:1px solid var(--border);
+  border-radius:16px;
+  background: rgba(255,255,255,0.02);
+  box-shadow: var(--shadow);
+}
+
+.module-subtabs{
+  display:flex;
+  gap:10px;
+  padding:10px;
+  margin-top:16px;
+  border:1px solid var(--border);
+  background: rgba(255,255,255,0.02);
+  border-radius:14px;
+}
+
+.module-subtab{
+  border:1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  padding:8px 12px;
+  border-radius:12px;
+  cursor:pointer;
+  transition: all 0.15s ease;
+  font-size:13px;
+}
+.module-subtab:hover{border-color: var(--border); color: var(--text);}
+.module-subtab.is-active{
+  background: rgba(106,169,255,0.15);
+  border-color: rgba(106,169,255,0.35);
+  color: var(--text);
+}
 
 /* Meeting workflow */
 .meeting-shell{

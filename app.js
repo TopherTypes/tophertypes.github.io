@@ -42,14 +42,39 @@ let actionsFilters = { ownerId: null, topicId: "", status: "" };
 let meetingCalendarView = "week";
 let meetingCalendarAnchor = new Date();
 let meetingView = "setup";
+// Tracks top-level module selection for the modular UI shell.
+let activeModule = "meetings";
+// Tracks the active tab within the Meetings module.
+let meetingModuleTab = "meeting";
+// Filters for the Tasks module list view.
+let taskFilters = { status: "", priority: "" };
 
 let syncInProgress = false;
 let hasUnsyncedChanges = false;
 let lastSyncAt = null;
 let lastRemoteModifiedTime = null;
 const itemEditState = new Map();
+// Stores inline edit state for tasks in the Tasks module.
+const taskEditState = new Map();
 let personViewId = null;
 let personEditorState = { isNew: false, draft: null, error: "" };
+
+/* ================================
+   TASKS MODULE CONFIG
+=================================== */
+
+const TASK_STATUS_LABELS = {
+  todo: "To do",
+  in_progress: "In progress",
+  blocked: "Blocked",
+  done: "Done"
+};
+
+const TASK_PRIORITY_LABELS = {
+  low: "Low",
+  medium: "Medium",
+  high: "High"
+};
 
 /* ================================
    UTIL
@@ -110,6 +135,18 @@ function fieldTag(required, key = "") {
       : "";
   }
   return `<span class="field-tag field-tag--required${required ? "" : " is-hidden"}" data-required-tag="${key}">Required</span>`;
+}
+
+/**
+ * Normalizes a task due date (YYYY-MM-DD) for display.
+ * @param {string} dueDate ISO-like date string.
+ * @returns {string} Friendly label for the due date.
+ */
+function formatTaskDueDate(dueDate) {
+  if (!dueDate) return "No due date";
+  const parsed = new Date(`${dueDate}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return dueDate;
+  return parsed.toLocaleDateString();
 }
 
 function createBuiltinTemplates() {
@@ -177,6 +214,32 @@ function validatePersonDraft(draft, personId = null) {
   if (!draft.organisation.trim()) errs.push("Organisation is required.");
   const nameExists = alive(db.people).some(p => p.id !== personId && p.name.toLowerCase() === draft.name.trim().toLowerCase());
   if (nameExists) errs.push("Name must be unique.");
+  return errs;
+}
+
+/**
+ * Creates an editable task draft from a task record.
+ * @param {object} task Task entity.
+ * @returns {object} Draft fields for editing.
+ */
+function createTaskDraft(task) {
+  return {
+    title: task?.title || "",
+    notes: task?.notes || "",
+    dueDate: task?.dueDate || "",
+    priority: task?.priority || "medium",
+    status: task?.status || "todo"
+  };
+}
+
+/**
+ * Validates a task draft and returns a list of user-facing errors.
+ * @param {object} draft Task draft input.
+ * @returns {string[]} Validation error messages.
+ */
+function validateTaskDraft(draft) {
+  const errs = [];
+  if (!draft.title.trim()) errs.push("Task title is required.");
   return errs;
 }
 
@@ -324,7 +387,8 @@ function makeDefaultDb() {
     groups: [],
     topics: [],
     meetings: [],
-    items: []
+    items: [],
+    tasks: []
   };
 }
 
@@ -733,6 +797,7 @@ function mergeDb(localDb, remoteDb) {
     topics: mergeCollections(l.topics || [], r.topics || []),
     meetings: mergeCollections(l.meetings || [], r.meetings || []),
     items: mergeCollections(l.items || [], r.items || []),
+    tasks: mergeCollections(l.tasks || [], r.tasks || []),
   };
 
   if (normalizeBuiltinTemplates(merged)) {
@@ -760,6 +825,9 @@ async function loadLocal() {
   if (!db.settings) {
     db.settings = { defaultOwnerName: "", updatedAt: nowIso() };
   }
+  if (!db.tasks) {
+    db.tasks = [];
+  }
 
   if (normalizeBuiltinTemplates(db)) {
     markDirty();
@@ -778,6 +846,12 @@ async function loadLocal() {
     };
     meetingCalendarView = meta.meetingCalendarView || "week";
     meetingCalendarAnchor = meta.meetingCalendarAnchor ? new Date(meta.meetingCalendarAnchor) : new Date();
+    activeModule = meta.activeModule || "meetings";
+    meetingModuleTab = meta.meetingModuleTab || "meeting";
+    taskFilters = {
+      status: meta.taskFilters?.status || "",
+      priority: meta.taskFilters?.priority || "",
+    };
     if (Number.isNaN(meetingCalendarAnchor.getTime())) {
       meetingCalendarAnchor = new Date();
     }
@@ -800,7 +874,10 @@ async function saveMeta() {
     lastRemoteModifiedTime,
     actionsFilters,
     meetingCalendarView,
-    meetingCalendarAnchor: meetingCalendarAnchor?.toISOString?.() || nowIso()
+    meetingCalendarAnchor: meetingCalendarAnchor?.toISOString?.() || nowIso(),
+    activeModule,
+    meetingModuleTab,
+    taskFilters
   });
   updateAuthUi();
 }
@@ -895,6 +972,9 @@ function getTemplate(id) {
 function getItem(id) {
   return alive(db.items).find(i => i.id === id) || null;
 }
+function getTask(id) {
+  return alive(db.tasks).find(t => t.id === id) || null;
+}
 
 function ensureTopic(name) {
   const existing = alive(db.topics).find(t => t.name.toLowerCase() === name.toLowerCase());
@@ -926,13 +1006,44 @@ function expandTargets(selectedPeopleIds, selectedGroupIds) {
    UI RENDERING
 =================================== */
 
-function setActiveTab(name) {
-  document.querySelectorAll(".tab").forEach(btn => {
-    btn.classList.toggle("is-active", btn.dataset.tab === name);
+/**
+ * Toggles the top-level module shell in the interface.
+ * @param {string} name Module name to activate.
+ */
+function setActiveModule(name) {
+  activeModule = name;
+  document.querySelectorAll(".module-tab").forEach(btn => {
+    btn.classList.toggle("is-active", btn.dataset.module === name);
   });
-  document.querySelectorAll(".panel").forEach(p => p.classList.remove("is-active"));
-  byId(`tab_${name}`).classList.add("is-active");
-  if (name === "meeting") setMeetingView(meetingView);
+  document.querySelectorAll(".module-panel").forEach(panel => panel.classList.remove("is-active"));
+  const target = byId(`module_${name}`);
+  if (target) {
+    target.classList.add("is-active");
+  }
+  if (name === "meetings") {
+    setMeetingModuleTab(meetingModuleTab);
+  }
+  saveMeta().catch(console.error);
+}
+
+/**
+ * Toggles the active tab within the Meetings module.
+ * @param {string} name Meeting module tab name to activate.
+ */
+function setMeetingModuleTab(name) {
+  meetingModuleTab = name;
+  const container = byId("module_meetings");
+  if (!container) return;
+  container.querySelectorAll(".module-subtab").forEach(btn => {
+    btn.classList.toggle("is-active", btn.dataset.moduleTab === name);
+  });
+  container.querySelectorAll(".module-section").forEach(section => {
+    section.classList.toggle("is-active", section.id === `module_tab_${name}`);
+  });
+  if (name === "meeting") {
+    setMeetingView(meetingView);
+  }
+  saveMeta().catch(console.error);
 }
 
 function setMeetingView(view) {
@@ -1778,7 +1889,8 @@ function wireItemButtons(rootEl) {
       currentMeetingId = mid;
       await saveMeta();
       setMeetingView("notes");
-      setActiveTab("meeting");
+      setActiveModule("meetings");
+      setMeetingModuleTab("meeting");
       renderAll();
     });
   });
@@ -2101,6 +2213,217 @@ function renderSearch() {
   wireItemButtons(out);
 }
 
+/**
+ * Renders the Tasks module list view.
+ */
+function renderTasks() {
+  const list = byId("tasks_list");
+  const countEl = byId("tasks_count");
+  if (!list || !countEl) return;
+
+  const statusFilter = taskFilters.status || "";
+  const priorityFilter = taskFilters.priority || "";
+
+  const statusSelect = byId("task_filter_status");
+  const prioritySelect = byId("task_filter_priority");
+  if (statusSelect && document.activeElement !== statusSelect) statusSelect.value = statusFilter;
+  if (prioritySelect && document.activeElement !== prioritySelect) prioritySelect.value = priorityFilter;
+
+  const filtered = alive(db.tasks).filter(task => {
+    const statusOk = statusFilter ? task.status === statusFilter : true;
+    const priorityOk = priorityFilter ? task.priority === priorityFilter : true;
+    return statusOk && priorityOk;
+  });
+
+  const sorted = filtered.sort((a, b) => {
+    const aDue = a.dueDate ? new Date(`${a.dueDate}T00:00:00`).getTime() : null;
+    const bDue = b.dueDate ? new Date(`${b.dueDate}T00:00:00`).getTime() : null;
+    if (aDue && bDue && aDue !== bDue) return aDue - bDue;
+    if (aDue && !bDue) return -1;
+    if (!aDue && bDue) return 1;
+    return Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
+  });
+
+  countEl.textContent = `${filtered.length} task${filtered.length === 1 ? "" : "s"} shown`;
+
+  if (!sorted.length) {
+    list.innerHTML = `<div class="muted">No tasks yet. Add your first task to get started.</div>`;
+    return;
+  }
+
+  list.innerHTML = sorted.map(task => renderTaskCard(task)).join("");
+  wireTaskList(list);
+}
+
+/**
+ * Builds a task card for the Tasks module list.
+ * @param {object} task Task record.
+ * @returns {string} Task list markup.
+ */
+function renderTaskCard(task) {
+  const state = taskEditState.get(task.id);
+  const isEditing = state?.isEditing;
+  const draft = state?.draft || createTaskDraft(task);
+  const error = state?.error || "";
+
+  const statusLabel = TASK_STATUS_LABELS[task.status] || task.status;
+  const priorityLabel = TASK_PRIORITY_LABELS[task.priority] || task.priority;
+  const dueLabel = formatTaskDueDate(task.dueDate);
+
+  const statusBadgeClass = task.status === "done"
+    ? "badge--ok"
+    : task.status === "blocked"
+      ? "badge--danger"
+      : task.status === "in_progress"
+        ? "badge--accent"
+        : "";
+  const priorityBadgeClass = task.priority === "high"
+    ? "badge--warn"
+    : task.priority === "low"
+      ? ""
+      : "badge--accent";
+
+  return `
+    <div class="item ${isEditing ? "item--editing" : ""}" data-task-id="${task.id}">
+      <div class="item__top">
+        <div><strong>${escapeHtml(task.title)}</strong></div>
+        <div class="badges">
+          <span class="badge ${statusBadgeClass}">${escapeHtml(statusLabel)}</span>
+          <span class="badge ${priorityBadgeClass}">${escapeHtml(priorityLabel)}</span>
+          <span class="badge">Due: ${escapeHtml(dueLabel)}</span>
+        </div>
+      </div>
+      <div class="item__text">${escapeHtml(task.notes || "No notes yet.")}</div>
+      <div class="item__meta">
+        <span>Updated ${escapeHtml(fmtDateTime(task.updatedAt))}</span>
+      </div>
+      <div class="item__actions">
+        <button class="smallbtn" data-task-action="toggle">
+          ${task.status === "done" ? "Reopen" : "Mark done"}
+        </button>
+        <button class="smallbtn" data-task-action="edit">Edit</button>
+        <button class="smallbtn smallbtn--danger" data-task-action="delete">Delete</button>
+      </div>
+      ${isEditing ? `
+        <div class="item__edit">
+          <div class="formrow">
+            <label>Title</label>
+            <input type="text" data-task-field="title" value="${escapeHtml(draft.title)}" />
+          </div>
+          <div class="formrow">
+            <label>Notes</label>
+            <textarea data-task-field="notes">${escapeHtml(draft.notes)}</textarea>
+          </div>
+          <div class="grid2">
+            <div class="formrow">
+              <label>Due date</label>
+              <input type="date" data-task-field="dueDate" value="${escapeHtml(draft.dueDate)}" />
+            </div>
+            <div class="formrow">
+              <label>Priority</label>
+              <select data-task-field="priority">
+                <option value="low" ${draft.priority === "low" ? "selected" : ""}>Low</option>
+                <option value="medium" ${draft.priority === "medium" ? "selected" : ""}>Medium</option>
+                <option value="high" ${draft.priority === "high" ? "selected" : ""}>High</option>
+              </select>
+            </div>
+          </div>
+          <div class="formrow">
+            <label>Status</label>
+            <select data-task-field="status">
+              <option value="todo" ${draft.status === "todo" ? "selected" : ""}>To do</option>
+              <option value="in_progress" ${draft.status === "in_progress" ? "selected" : ""}>In progress</option>
+              <option value="blocked" ${draft.status === "blocked" ? "selected" : ""}>Blocked</option>
+              <option value="done" ${draft.status === "done" ? "selected" : ""}>Done</option>
+            </select>
+          </div>
+          ${error ? `<div class="item__error">${escapeHtml(error)}</div>` : ""}
+          <div class="item__actions">
+            <button class="smallbtn" data-task-action="save">Save</button>
+            <button class="smallbtn" data-task-action="cancel">Cancel</button>
+          </div>
+        </div>
+      ` : ""}
+    </div>
+  `;
+}
+
+/**
+ * Wires click handlers for task cards.
+ * @param {HTMLElement} container Task list container.
+ */
+function wireTaskList(container) {
+  container.querySelectorAll("[data-task-action]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const action = btn.getAttribute("data-task-action");
+      const card = btn.closest("[data-task-id]");
+      if (!action || !card) return;
+      const taskId = card.getAttribute("data-task-id");
+      const task = getTask(taskId);
+      if (!task) return;
+
+      if (action === "toggle") {
+        task.status = task.status === "done" ? "todo" : "done";
+        task.updatedAt = nowIso();
+        markDirty();
+        await saveLocal();
+        renderTasks();
+        return;
+      }
+
+      if (action === "edit") {
+        taskEditState.set(taskId, { isEditing: true, draft: createTaskDraft(task), error: "" });
+        renderTasks();
+        return;
+      }
+
+      if (action === "cancel") {
+        taskEditState.delete(taskId);
+        renderTasks();
+        return;
+      }
+
+      if (action === "delete") {
+        const confirmDelete = confirm("Delete this task? This cannot be undone.");
+        if (!confirmDelete) return;
+        task.deleted = true;
+        task.updatedAt = nowIso();
+        taskEditState.delete(taskId);
+        markDirty();
+        await saveLocal();
+        renderTasks();
+        return;
+      }
+
+      if (action === "save") {
+        const draft = {
+          title: card.querySelector("[data-task-field='title']")?.value || "",
+          notes: card.querySelector("[data-task-field='notes']")?.value || "",
+          dueDate: card.querySelector("[data-task-field='dueDate']")?.value || "",
+          priority: card.querySelector("[data-task-field='priority']")?.value || "medium",
+          status: card.querySelector("[data-task-field='status']")?.value || "todo"
+        };
+        const errs = validateTaskDraft(draft);
+        if (errs.length) {
+          taskEditState.set(taskId, { isEditing: true, draft, error: errs.join(" ") });
+          renderTasks();
+          return;
+        }
+        task.title = draft.title.trim();
+        task.notes = draft.notes.trim();
+        task.dueDate = draft.dueDate;
+        task.priority = draft.priority;
+        task.status = draft.status;
+        task.updatedAt = nowIso();
+        taskEditState.delete(taskId);
+        markDirty();
+        await saveLocal();
+        renderTasks();
+      }
+    });
+  });
+}
+
 function renderAll() {
   renderTemplates();
   renderTopics();
@@ -2117,6 +2440,7 @@ function renderAll() {
   renderSearch();
   renderQuickSearch();
   renderMeetingCalendar();
+  renderTasks();
 
   const defaultOwnerInput = byId("default_owner_name");
   if (defaultOwnerInput && document.activeElement !== defaultOwnerInput) {
@@ -2127,6 +2451,68 @@ function renderAll() {
 /* ================================
    ACTIONS
 =================================== */
+
+/**
+ * Reads the task creation form fields into a draft object.
+ * @returns {object} Task draft from the form.
+ */
+function readTaskFormDraft() {
+  return {
+    title: byId("task_title")?.value || "",
+    notes: byId("task_notes")?.value || "",
+    dueDate: byId("task_due")?.value || "",
+    priority: byId("task_priority")?.value || "medium",
+    status: byId("task_status")?.value || "todo"
+  };
+}
+
+/**
+ * Resets the task creation form to its defaults.
+ */
+function clearTaskForm() {
+  const defaults = createTaskDraft(null);
+  const titleInput = byId("task_title");
+  const notesInput = byId("task_notes");
+  const dueInput = byId("task_due");
+  const prioritySelect = byId("task_priority");
+  const statusSelect = byId("task_status");
+
+  if (titleInput) titleInput.value = defaults.title;
+  if (notesInput) notesInput.value = defaults.notes;
+  if (dueInput) dueInput.value = defaults.dueDate;
+  if (prioritySelect) prioritySelect.value = defaults.priority;
+  if (statusSelect) statusSelect.value = defaults.status;
+}
+
+/**
+ * Adds a new task to the local database.
+ */
+async function addTask() {
+  const draft = readTaskFormDraft();
+  const errs = validateTaskDraft(draft);
+  if (errs.length) {
+    alert(errs.join(" "));
+    return;
+  }
+
+  const now = nowIso();
+  const task = {
+    id: uid("task"),
+    title: draft.title.trim(),
+    notes: draft.notes.trim(),
+    dueDate: draft.dueDate,
+    priority: draft.priority,
+    status: draft.status,
+    createdAt: now,
+    updatedAt: now
+  };
+
+  db.tasks.push(task);
+  clearTaskForm();
+  markDirty();
+  await saveLocal();
+  renderTasks();
+}
 
 async function createMeeting() {
   const templateId = byId("meeting_template").value;
@@ -2315,9 +2701,27 @@ async function importJsonBackup(file) {
    WIRING
 =================================== */
 
-function wireTabs() {
-  document.querySelectorAll(".tab").forEach(btn => {
-    btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));
+function wireModules() {
+  document.querySelectorAll(".module-tab").forEach(btn => {
+    btn.addEventListener("click", () => setActiveModule(btn.dataset.module));
+  });
+  document.querySelectorAll(".module-subtab").forEach(btn => {
+    btn.addEventListener("click", () => setMeetingModuleTab(btn.dataset.moduleTab));
+  });
+}
+
+function wireTasksControls() {
+  byId("task_add_btn")?.addEventListener("click", addTask);
+  byId("task_clear_btn")?.addEventListener("click", clearTaskForm);
+  byId("task_filter_status")?.addEventListener("change", (event) => {
+    taskFilters.status = event.target.value;
+    saveMeta().catch(console.error);
+    renderTasks();
+  });
+  byId("task_filter_priority")?.addEventListener("change", (event) => {
+    taskFilters.priority = event.target.value;
+    saveMeta().catch(console.error);
+    renderTasks();
   });
 }
 
@@ -2510,7 +2914,7 @@ function wirePeopleControls() {
 
 async function init() {
   // basic UI wiring
-  wireTabs();
+  wireModules();
   wireTopButtons();
   wireMeetingControls();
   wireUpdatesControls();
@@ -2519,6 +2923,7 @@ async function init() {
   wireSearchControls();
   wireSettingsControls();
   wirePeopleControls();
+  wireTasksControls();
 
   // buttons disabled until APIs ready
   byId("auth_btn").disabled = true;
@@ -2539,6 +2944,7 @@ async function init() {
   byId("meeting_datetime").value = localISO;
 
   renderAll();
+  setActiveModule(activeModule);
   setMeetingView(meetingView);
   updateAuthUi();
 }

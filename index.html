@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Meeting Notes</title>
+  <title>Personal Organiser</title>
   <link rel="stylesheet" href="app.css" />
 </head>
 <body>
@@ -11,8 +11,8 @@
   <header class="topbar">
     <div class="topbar__left">
       <div class="brand">
-        <div class="brand__title">Meeting Notes</div>
-        <div class="brand__subtitle">Offline-first • Drive sync • Per-person updates</div>
+        <div class="brand__title">Personal Organiser</div>
+        <div class="brand__subtitle">Offline-first • Drive sync • Modular planning workspace</div>
       </div>
     </div>
 
@@ -29,159 +29,258 @@
 
   <!-- Primary app layout -->
   <main class="layout">
-    <!-- Main navigation tabs -->
-    <nav class="tabs">
-      <button class="tab is-active" data-tab="meeting">Meeting</button>
-      <button class="tab" data-tab="people">People</button>
-      <button class="tab" data-tab="updates">Updates</button>
-      <button class="tab" data-tab="actions">My Actions</button>
-      <button class="tab" data-tab="topics">Topics</button>
-      <button class="tab" data-tab="search">Search</button>
-      <button class="tab" data-tab="settings">Settings</button>
+    <!-- Main module navigation -->
+    <nav class="module-tabs" aria-label="Primary modules">
+      <button class="module-tab is-active" data-module="meetings">Meetings</button>
+      <button class="module-tab" data-module="people">People</button>
+      <button class="module-tab" data-module="tasks">Tasks</button>
+      <button class="module-tab" data-module="settings">Settings</button>
     </nav>
 
-    <!-- Meeting setup + notes workflow -->
-    <section class="panel is-active" id="tab_meeting">
-      <div class="meeting-shell">
-        <div class="meeting-shell__header">
-          <div>
-            <h2>Meeting workspace</h2>
-            <div class="muted">Plan meetings in the calendar, then switch to Notes for a focused capture view.</div>
-          </div>
-          <div class="segmented" role="tablist" aria-label="Meeting views">
-            <button class="segmented__btn is-active" type="button" data-meeting-view="setup" role="tab" aria-controls="meeting_view_setup" aria-selected="true">Schedule</button>
-            <button class="segmented__btn" type="button" data-meeting-view="notes" role="tab" aria-controls="meeting_view_notes" aria-selected="false">Notes</button>
-          </div>
+    <!-- Meetings module -->
+    <section class="module-panel is-active" id="module_meetings">
+      <div class="module-header">
+        <div>
+          <h2>Meetings module</h2>
+          <div class="muted">Schedule, capture notes, and track meeting-driven work.</div>
         </div>
       </div>
 
-      <!-- Meeting scheduling view -->
-      <div class="meeting-view is-active" data-meeting-view-panel="setup" id="meeting_view_setup" role="tabpanel">
-        <div class="grid2">
-          <div class="card">
-            <h2>Create / Open meeting</h2>
+      <nav class="module-subtabs" aria-label="Meeting workspace tabs">
+        <button class="module-subtab is-active" data-module-tab="meeting">Meeting</button>
+        <button class="module-subtab" data-module-tab="updates">Updates</button>
+        <button class="module-subtab" data-module-tab="actions">My Actions</button>
+        <button class="module-subtab" data-module-tab="topics">Topics</button>
+        <button class="module-subtab" data-module-tab="search">Search</button>
+      </nav>
 
-            <div class="formrow">
-              <label>Template</label>
-              <select id="meeting_template"></select>
-            </div>
-
-            <div class="formrow">
-              <label>Topic / Project</label>
-              <div class="row">
-                <select id="meeting_topic"></select>
-                <button class="btn btn--ghost" id="add_topic_btn">+ Topic</button>
-              </div>
-            </div>
-
-            <div class="formrow">
-              <label>Meeting title (optional)</label>
-              <input id="meeting_title" type="text" placeholder="e.g., Weekly catch-up" />
-            </div>
-
-            <div class="formrow">
-              <label>Date/time</label>
-              <input id="meeting_datetime" type="datetime-local" />
-            </div>
-
-            <div class="row row--space">
-              <button class="btn btn--primary" id="create_meeting_btn">Create meeting</button>
-              <button class="btn" id="open_meeting_btn">Open existing…</button>
-            </div>
-
-            <hr />
-
-            <div class="formrow">
-              <label>Current meeting</label>
-              <div class="muted" id="current_meeting_label">None selected.</div>
-            </div>
-
-            <div class="row row--space">
-              <button class="btn" id="download_meeting_summary_btn">Copy meeting summary</button>
-              <button class="btn btn--ghost" id="delete_meeting_btn">Delete meeting</button>
-            </div>
-          </div>
-
-          <div class="card">
-            <h2>Quick lookup</h2>
-            <div class="formrow">
-              <label>Search past notes</label>
-              <input id="quick_search" type="text" placeholder="Type to search…" />
-            </div>
-            <div id="quick_search_results" class="list"></div>
-          </div>
-        </div>
-
-        <div class="card meeting-calendar">
-          <div class="calendar-header">
+      <!-- Meeting setup + notes workflow -->
+      <section class="module-section is-active" id="module_tab_meeting">
+        <div class="meeting-shell">
+          <div class="meeting-shell__header">
             <div>
-              <h2>Meeting calendar</h2>
-              <div class="muted">Scan every scheduled meeting by date, topic, and time.</div>
+              <h2>Meeting workspace</h2>
+              <div class="muted">Plan meetings in the calendar, then switch to Notes for a focused capture view.</div>
             </div>
-            <div class="calendar-controls">
-              <div class="segmented" role="tablist" aria-label="Calendar view">
-                <button class="segmented__btn is-active" type="button" data-calendar-view="week">Week</button>
-                <button class="segmented__btn" type="button" data-calendar-view="month">Month</button>
-              </div>
-              <div class="calendar-nav">
-                <button class="btn btn--ghost" type="button" data-calendar-nav="prev">◀</button>
-                <button class="btn btn--ghost" type="button" data-calendar-nav="today">Today</button>
-                <button class="btn btn--ghost" type="button" data-calendar-nav="next">▶</button>
-              </div>
+            <div class="segmented" role="tablist" aria-label="Meeting views">
+              <button class="segmented__btn is-active" type="button" data-meeting-view="setup" role="tab" aria-controls="meeting_view_setup" aria-selected="true">Schedule</button>
+              <button class="segmented__btn" type="button" data-meeting-view="notes" role="tab" aria-controls="meeting_view_notes" aria-selected="false">Notes</button>
             </div>
           </div>
-          <div class="calendar-range muted" id="calendar_range"></div>
-          <div id="meeting_calendar"></div>
         </div>
-      </div>
 
-      <!-- Meeting notes capture view -->
-      <div class="meeting-view" data-meeting-view-panel="notes" id="meeting_view_notes" role="tabpanel" hidden>
-        <div class="card meeting-notes-card" id="meeting_work_area">
-          <h2>Meeting notes</h2>
-          <div class="muted">Create or open a meeting to start taking notes.</div>
+        <!-- Meeting scheduling view -->
+        <div class="meeting-view is-active" data-meeting-view-panel="setup" id="meeting_view_setup" role="tabpanel">
+          <div class="grid2">
+            <div class="card">
+              <h2>Create / Open meeting</h2>
+
+              <div class="formrow">
+                <label>Template</label>
+                <select id="meeting_template"></select>
+              </div>
+
+              <div class="formrow">
+                <label>Topic / Project</label>
+                <div class="row">
+                  <select id="meeting_topic"></select>
+                  <button class="btn btn--ghost" id="add_topic_btn">+ Topic</button>
+                </div>
+              </div>
+
+              <div class="formrow">
+                <label>Meeting title (optional)</label>
+                <input id="meeting_title" type="text" placeholder="e.g., Weekly catch-up" />
+              </div>
+
+              <div class="formrow">
+                <label>Date/time</label>
+                <input id="meeting_datetime" type="datetime-local" />
+              </div>
+
+              <div class="row row--space">
+                <button class="btn btn--primary" id="create_meeting_btn">Create meeting</button>
+                <button class="btn" id="open_meeting_btn">Open existing…</button>
+              </div>
+
+              <hr />
+
+              <div class="formrow">
+                <label>Current meeting</label>
+                <div class="muted" id="current_meeting_label">None selected.</div>
+              </div>
+
+              <div class="row row--space">
+                <button class="btn" id="download_meeting_summary_btn">Copy meeting summary</button>
+                <button class="btn btn--ghost" id="delete_meeting_btn">Delete meeting</button>
+              </div>
+            </div>
+
+            <div class="card">
+              <h2>Quick lookup</h2>
+              <div class="formrow">
+                <label>Search past notes</label>
+                <input id="quick_search" type="text" placeholder="Type to search…" />
+              </div>
+              <div id="quick_search_results" class="list"></div>
+            </div>
+          </div>
+
+          <div class="card meeting-calendar">
+            <div class="calendar-header">
+              <div>
+                <h2>Meeting calendar</h2>
+                <div class="muted">Scan every scheduled meeting by date, topic, and time.</div>
+              </div>
+              <div class="calendar-controls">
+                <div class="segmented" role="tablist" aria-label="Calendar view">
+                  <button class="segmented__btn is-active" type="button" data-calendar-view="week">Week</button>
+                  <button class="segmented__btn" type="button" data-calendar-view="month">Month</button>
+                </div>
+                <div class="calendar-nav">
+                  <button class="btn btn--ghost" type="button" data-calendar-nav="prev">◀</button>
+                  <button class="btn btn--ghost" type="button" data-calendar-nav="today">Today</button>
+                  <button class="btn btn--ghost" type="button" data-calendar-nav="next">▶</button>
+                </div>
+              </div>
+            </div>
+            <div class="calendar-range muted" id="calendar_range"></div>
+            <div id="meeting_calendar"></div>
+          </div>
         </div>
-      </div>
+
+        <!-- Meeting notes capture view -->
+        <div class="meeting-view" data-meeting-view-panel="notes" id="meeting_view_notes" role="tabpanel" hidden>
+          <div class="card meeting-notes-card" id="meeting_work_area">
+            <h2>Meeting notes</h2>
+            <div class="muted">Create or open a meeting to start taking notes.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Updates status by person -->
+      <section class="module-section" id="module_tab_updates">
+        <div class="card">
+          <h2>Updates by person</h2>
+
+          <div class="grid2">
+            <div>
+              <div class="formrow">
+                <label>Person</label>
+                <select id="updates_person"></select>
+              </div>
+
+              <div class="row row--space">
+                <button class="btn btn--primary" id="mark_updates_btn">Mark all shown as updated</button>
+                <button class="btn" id="copy_updates_btn">Copy updates text</button>
+              </div>
+
+              <p class="muted">
+                This marks updates only for the selected person — if an item also targets other people,
+                it stays pending for them.
+              </p>
+            </div>
+
+            <div>
+              <div class="formrow">
+                <label>Filter</label>
+                <input id="updates_filter" type="text" placeholder="Filter pending updates…" />
+              </div>
+              <div class="muted" id="updates_count"></div>
+            </div>
+          </div>
+
+          <div id="updates_list" class="list"></div>
+        </div>
+      </section>
+
+      <!-- Action items assigned to the current user -->
+      <section class="module-section" id="module_tab_actions">
+        <div class="card">
+          <h2>My Actions</h2>
+
+          <div class="filters">
+            <div class="formrow">
+              <label>Owner</label>
+              <select id="actions_owner"></select>
+            </div>
+
+            <div class="formrow">
+              <label>Topic</label>
+              <select id="actions_topic"></select>
+            </div>
+
+            <div class="formrow">
+              <label>Status</label>
+              <select id="actions_status">
+                <option value="">Any status</option>
+                <option value="open">Open</option>
+                <option value="in_progress">In progress</option>
+                <option value="blocked">Blocked</option>
+                <option value="done">Done</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="muted" id="actions_count"></div>
+          <div id="actions_list" class="list"></div>
+        </div>
+      </section>
+
+      <!-- Topic management and history -->
+      <section class="module-section" id="module_tab_topics">
+        <div class="card">
+          <h2>Topic overview</h2>
+
+          <div class="grid2">
+            <div class="formrow">
+              <label>Topic</label>
+              <select id="topics_topic"></select>
+            </div>
+
+            <div class="formrow">
+              <label>Focus</label>
+              <select id="topics_focus">
+                <option value="overview">Overview</option>
+                <option value="actions">Open actions</option>
+                <option value="decisions">Decisions</option>
+                <option value="questions">Questions</option>
+                <option value="info">Information</option>
+              </select>
+            </div>
+          </div>
+
+          <div id="topic_output" class="list"></div>
+        </div>
+      </section>
+
+      <!-- Search across meetings and notes -->
+      <section class="module-section" id="module_tab_search">
+        <div class="card">
+          <h2>Search everything</h2>
+          <div class="grid2">
+            <div class="formrow">
+              <label>Search</label>
+              <input id="search_query" type="text" placeholder="e.g., 'supplier', 'decision', 'Afonso'…" />
+            </div>
+            <div class="formrow">
+              <label>Type</label>
+              <select id="search_type">
+                <option value="all">All</option>
+                <option value="info">Info</option>
+                <option value="question">Question</option>
+                <option value="decision">Decision</option>
+                <option value="action">Action</option>
+              </select>
+            </div>
+          </div>
+          <div id="search_results" class="list"></div>
+        </div>
+      </section>
     </section>
 
-    <!-- Updates status by person -->
-    <section class="panel" id="tab_updates">
-      <div class="card">
-        <h2>Updates by person</h2>
-
-        <div class="grid2">
-          <div>
-            <div class="formrow">
-              <label>Person</label>
-              <select id="updates_person"></select>
-            </div>
-
-            <div class="row row--space">
-              <button class="btn btn--primary" id="mark_updates_btn">Mark all shown as updated</button>
-              <button class="btn" id="copy_updates_btn">Copy updates text</button>
-            </div>
-
-            <p class="muted">
-              This marks updates only for the selected person — if an item also targets other people,
-              it stays pending for them.
-            </p>
-          </div>
-
-          <div>
-            <div class="formrow">
-              <label>Filter</label>
-              <input id="updates_filter" type="text" placeholder="Filter pending updates…" />
-            </div>
-            <div class="muted" id="updates_count"></div>
-          </div>
-        </div>
-
-        <div id="updates_list" class="list"></div>
-      </div>
-    </section>
-
-    <!-- People directory & profiles -->
-    <section class="panel" id="tab_people">
+    <!-- People module -->
+    <section class="module-panel" id="module_people">
       <div class="grid2">
         <div class="card">
           <div class="row row--space">
@@ -218,92 +317,82 @@
       </div>
     </section>
 
-    <!-- Action items assigned to the current user -->
-    <section class="panel" id="tab_actions">
-      <div class="card">
-        <h2>My Actions</h2>
+    <!-- Tasks module -->
+    <section class="module-panel" id="module_tasks">
+      <div class="module-header">
+        <div>
+          <h2>Tasks module</h2>
+          <div class="muted">Capture personal to-dos and track progress in one place.</div>
+        </div>
+      </div>
 
-        <div class="filters">
+      <div class="grid2">
+        <div class="card">
+          <h2>Create task</h2>
           <div class="formrow">
-            <label>Owner</label>
-            <select id="actions_owner"></select>
+            <label>Task title</label>
+            <input id="task_title" type="text" placeholder="e.g., Review contract updates" />
           </div>
-
           <div class="formrow">
-            <label>Topic</label>
-            <select id="actions_topic"></select>
+            <label>Notes</label>
+            <textarea id="task_notes" placeholder="Capture context or next steps…"></textarea>
           </div>
-
+          <div class="grid2">
+            <div class="formrow">
+              <label>Due date</label>
+              <input id="task_due" type="date" />
+            </div>
+            <div class="formrow">
+              <label>Priority</label>
+              <select id="task_priority">
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+          </div>
           <div class="formrow">
             <label>Status</label>
-            <select id="actions_status">
-              <option value="">Any status</option>
-              <option value="open">Open</option>
+            <select id="task_status">
+              <option value="todo">To do</option>
               <option value="in_progress">In progress</option>
               <option value="blocked">Blocked</option>
               <option value="done">Done</option>
             </select>
           </div>
-        </div>
-
-        <div class="muted" id="actions_count"></div>
-        <div id="actions_list" class="list"></div>
-      </div>
-    </section>
-
-    <!-- Topic management and history -->
-    <section class="panel" id="tab_topics">
-      <div class="card">
-        <h2>Topic overview</h2>
-
-        <div class="grid2">
-          <div class="formrow">
-            <label>Topic</label>
-            <select id="topics_topic"></select>
-          </div>
-
-          <div class="formrow">
-            <label>Focus</label>
-            <select id="topics_focus">
-              <option value="overview">Overview</option>
-              <option value="actions">Open actions</option>
-              <option value="decisions">Decisions</option>
-              <option value="questions">Questions</option>
-              <option value="info">Information</option>
-            </select>
+          <div class="row row--space">
+            <button class="btn btn--primary" id="task_add_btn">Add task</button>
+            <button class="btn btn--ghost" id="task_clear_btn">Clear</button>
           </div>
         </div>
 
-        <div id="topic_output" class="list"></div>
-      </div>
-    </section>
-
-    <!-- Search across meetings and notes -->
-    <section class="panel" id="tab_search">
-      <div class="card">
-        <h2>Search everything</h2>
-        <div class="grid2">
-          <div class="formrow">
-            <label>Search</label>
-            <input id="search_query" type="text" placeholder="e.g., 'supplier', 'decision', 'Afonso'…" />
+        <div class="card">
+          <div class="row row--space">
+            <h2>Tasks</h2>
+            <div class="row">
+              <select id="task_filter_status">
+                <option value="">All statuses</option>
+                <option value="todo">To do</option>
+                <option value="in_progress">In progress</option>
+                <option value="blocked">Blocked</option>
+                <option value="done">Done</option>
+              </select>
+              <select id="task_filter_priority">
+                <option value="">All priorities</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
           </div>
-          <div class="formrow">
-            <label>Type</label>
-            <select id="search_type">
-              <option value="all">All</option>
-              <option value="info">Info</option>
-              <option value="question">Question</option>
-              <option value="decision">Decision</option>
-              <option value="action">Action</option>
-            </select>
-          </div>
+          <div class="muted" id="tasks_count"></div>
+          <div id="tasks_list" class="list"></div>
         </div>
-        <div id="search_results" class="list"></div>
       </div>
     </section>
 
     <!-- Settings and data export -->
-    <section class="panel" id="tab_settings">
+    <section class="module-panel" id="module_settings">
       <div class="grid2">
         <div class="card">
           <h2>Groups</h2>
