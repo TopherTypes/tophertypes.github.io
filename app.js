@@ -56,6 +56,8 @@ let lastRemoteModifiedTime = null;
 const itemEditState = new Map();
 let personViewId = null;
 let personEditorState = { isNew: false, draft: null, error: "" };
+// Tracks draft state for the person creation lightbox flow.
+let personCreateState = { draft: null, error: "" };
 
 /* ================================
    TASKS MODULE CONFIG
@@ -91,6 +93,42 @@ function uid(prefix) {
 }
 /** @returns {HTMLElement|null} Convenience DOM accessor by id. */
 function byId(id){ return document.getElementById(id); }
+
+/**
+ * Opens a lightbox modal and optionally focuses a field within it.
+ * @param {string} lightboxId DOM id of the lightbox container.
+ * @param {string} [focusId] Optional field id to focus on open.
+ */
+function openLightbox(lightboxId, focusId = "") {
+  const lightbox = byId(lightboxId);
+  if (!lightbox) return;
+  lightbox.classList.add("is-visible");
+  lightbox.setAttribute("aria-hidden", "false");
+  if (focusId) {
+    byId(focusId)?.focus();
+  }
+}
+
+/**
+ * Closes a lightbox modal by id.
+ * @param {string} lightboxId DOM id of the lightbox container.
+ */
+function closeLightbox(lightboxId) {
+  const lightbox = byId(lightboxId);
+  if (!lightbox) return;
+  lightbox.classList.remove("is-visible");
+  lightbox.setAttribute("aria-hidden", "true");
+}
+
+/**
+ * Closes any visible lightbox modals to keep keyboard escape behavior consistent.
+ */
+function closeVisibleLightboxes() {
+  document.querySelectorAll(".lightbox.is-visible").forEach(lightbox => {
+    lightbox.classList.remove("is-visible");
+    lightbox.setAttribute("aria-hidden", "true");
+  });
+}
 
 /** Updates the network status pill based on navigator connectivity. */
 function setNetStatus() {
@@ -311,13 +349,6 @@ function fmtDate(iso) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString(undefined, { year:"numeric", month:"short", day:"2-digit" });
-}
-
-function promptNonEmpty(label, placeholder="") {
-  const v = prompt(label, placeholder);
-  if (v === null) return null;
-  const t = v.trim();
-  return t.length ? t : null;
 }
 
 function copyToClipboard(text) {
@@ -2404,21 +2435,83 @@ function renderAll() {
  * Opens the task creation lightbox.
  */
 function openTaskLightbox() {
-  const lightbox = byId("task_lightbox");
-  if (!lightbox) return;
-  lightbox.classList.add("is-visible");
-  lightbox.setAttribute("aria-hidden", "false");
-  byId("task_title")?.focus();
+  openLightbox("task_lightbox", "task_title");
 }
 
 /**
  * Closes the task creation lightbox and clears draft errors.
  */
 function closeTaskLightbox() {
-  const lightbox = byId("task_lightbox");
-  if (!lightbox) return;
-  lightbox.classList.remove("is-visible");
-  lightbox.setAttribute("aria-hidden", "true");
+  closeLightbox("task_lightbox");
+}
+
+/**
+ * Clears the meeting creation form inputs so each draft starts clean.
+ */
+function clearMeetingForm() {
+  const titleInput = byId("meeting_title");
+  const datetimeInput = byId("meeting_datetime");
+  if (titleInput) titleInput.value = "";
+  if (datetimeInput) datetimeInput.value = "";
+}
+
+/**
+ * Opens the meeting creation lightbox and resets draft-specific inputs.
+ */
+function openMeetingLightbox() {
+  clearMeetingForm();
+  openLightbox("meeting_lightbox", "meeting_title");
+}
+
+/**
+ * Opens the topic creation lightbox and resets validation state.
+ */
+function openTopicLightbox() {
+  const input = byId("topic_name_input");
+  if (input) input.value = "";
+  setLightboxError("topic_lightbox_error", "");
+  openLightbox("topic_lightbox", "topic_name_input");
+}
+
+/**
+ * Opens the group creation lightbox and resets validation state.
+ */
+function openGroupLightbox() {
+  const input = byId("group_name_input");
+  if (input) input.value = "";
+  setLightboxError("group_lightbox_error", "");
+  openLightbox("group_lightbox", "group_name_input");
+}
+
+/**
+ * Opens the person creation lightbox and resets draft and validation state.
+ */
+function openPersonLightbox() {
+  personCreateState = { draft: createPersonDraft(null), error: "" };
+  const nameInput = byId("person_create_name");
+  const emailInput = byId("person_create_email");
+  const orgInput = byId("person_create_org");
+  const titleInput = byId("person_create_title");
+
+  if (nameInput) nameInput.value = personCreateState.draft.name;
+  if (emailInput) emailInput.value = personCreateState.draft.email;
+  if (orgInput) orgInput.value = personCreateState.draft.organisation;
+  if (titleInput) titleInput.value = personCreateState.draft.jobTitle;
+
+  setLightboxError("person_lightbox_error", "");
+  openLightbox("person_lightbox", "person_create_name");
+}
+
+/**
+ * Updates a lightbox error container with the provided message.
+ * @param {string} errorId DOM id of the error container.
+ * @param {string} message Error message to display.
+ */
+function setLightboxError(errorId, message) {
+  const errorEl = byId(errorId);
+  if (!errorEl) return;
+  errorEl.textContent = message;
+  errorEl.hidden = !message;
 }
 
 /**
@@ -2451,6 +2544,80 @@ function clearTaskForm() {
   if (dueInput) dueInput.value = defaults.dueDate;
   if (prioritySelect) prioritySelect.value = defaults.priority;
   if (statusSelect) statusSelect.value = defaults.status;
+}
+
+/**
+ * Reads the topic creation input, validates, and persists a new topic.
+ */
+async function addTopicFromLightbox() {
+  const name = byId("topic_name_input")?.value.trim() || "";
+  if (!name) {
+    setLightboxError("topic_lightbox_error", "Topic name is required.");
+    return;
+  }
+
+  const topicId = ensureTopic(name);
+  markDirty();
+  await saveLocal();
+  renderAll();
+  const meetingTopic = byId("meeting_topic");
+  if (meetingTopic) {
+    meetingTopic.value = topicId;
+  }
+  closeLightbox("topic_lightbox");
+}
+
+/**
+ * Reads the group creation input, validates, and persists a new group.
+ */
+async function addGroupFromLightbox() {
+  const name = byId("group_name_input")?.value.trim() || "";
+  if (!name) {
+    setLightboxError("group_lightbox_error", "Group name is required.");
+    return;
+  }
+
+  const exists = alive(db.groups).some(group => group.name.toLowerCase() === name.toLowerCase());
+  if (exists) {
+    setLightboxError("group_lightbox_error", "A group with this name already exists.");
+    return;
+  }
+
+  db.groups.push({ id: uid("group"), name, memberIds: [], updatedAt: nowIso() });
+  markDirty();
+  await saveLocal();
+  renderAll();
+  closeLightbox("group_lightbox");
+}
+
+/**
+ * Reads the person creation inputs, validates, and persists a new person.
+ */
+async function addPersonFromLightbox() {
+  const name = byId("person_create_name")?.value.trim() || "";
+  const email = byId("person_create_email")?.value.trim() || "";
+  const organisation = byId("person_create_org")?.value.trim() || "";
+  const jobTitle = byId("person_create_title")?.value.trim() || "";
+  const draft = { name, email, organisation, jobTitle };
+  const errs = validatePersonDraft(draft, null);
+
+  if (errs.length) {
+    setLightboxError("person_lightbox_error", errs.join(" "));
+    return;
+  }
+
+  const person = {
+    id: uid("person"),
+    ...draft,
+    updatedAt: nowIso(),
+  };
+  db.people.push(person);
+  personViewId = person.id;
+  personEditorState = { isNew: false, draft: createPersonDraft(person), error: "" };
+  markDirty();
+  await saveLocal();
+  renderAll();
+  closeLightbox("person_lightbox");
 }
 
 /**
@@ -2508,6 +2675,8 @@ async function createMeeting() {
   db.meetings.push(meeting);
   currentMeetingId = meeting.id;
   setMeetingView("notes");
+  clearMeetingForm();
+  closeLightbox("meeting_lightbox");
 
   markDirty();
   await saveLocal();
@@ -2685,16 +2854,6 @@ function wireTasksControls() {
   byId("task_open_modal_btn")?.addEventListener("click", openTaskLightbox);
   byId("task_add_btn")?.addEventListener("click", addTask);
   byId("task_clear_btn")?.addEventListener("click", clearTaskForm);
-  byId("task_lightbox")?.addEventListener("click", (event) => {
-    if (event.target?.matches("[data-lightbox-close]")) {
-      closeTaskLightbox();
-    }
-  });
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      closeTaskLightbox();
-    }
-  });
   byId("task_filter_status")?.addEventListener("change", (event) => {
     taskFilters.status = event.target.value;
     saveMeta().catch(console.error);
@@ -2707,6 +2866,33 @@ function wireTasksControls() {
   });
 }
 
+/**
+ * Wires shared lightbox dismissal controls for all modal flows.
+ */
+function wireLightboxControls() {
+  const lightboxIds = [
+    "task_lightbox",
+    "meeting_lightbox",
+    "topic_lightbox",
+    "person_lightbox",
+    "group_lightbox"
+  ];
+
+  lightboxIds.forEach((id) => {
+    byId(id)?.addEventListener("click", (event) => {
+      if (event.target?.matches("[data-lightbox-close]")) {
+        closeLightbox(id);
+      }
+    });
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeVisibleLightboxes();
+    }
+  });
+}
+
 function wireTopButtons() {
   byId("auth_btn").addEventListener("click", handleAuthClick);
   byId("signout_btn").addEventListener("click", handleSignoutClick);
@@ -2714,21 +2900,14 @@ function wireTopButtons() {
 }
 
 function wireMeetingControls() {
+  byId("meeting_open_lightbox_btn")?.addEventListener("click", openMeetingLightbox);
   byId("create_meeting_btn").addEventListener("click", createMeeting);
   byId("open_meeting_btn").addEventListener("click", () => renderMeetingSelectDialog());
   byId("delete_meeting_btn").addEventListener("click", deleteCurrentMeeting);
   byId("download_meeting_summary_btn").addEventListener("click", copyMeetingSummary);
 
-  byId("add_topic_btn").addEventListener("click", async () => {
-    const name = promptNonEmpty("Topic name:", "");
-    if (!name) return;
-    const id = ensureTopic(name);
-    markDirty();
-    await saveLocal();
-    renderAll();
-    // select it
-    byId("meeting_topic").value = id;
-  });
+  byId("add_topic_btn").addEventListener("click", openTopicLightbox);
+  byId("topic_add_btn").addEventListener("click", addTopicFromLightbox);
 
   byId("quick_search").addEventListener("input", debounce(renderQuickSearch, 150));
 
@@ -2796,19 +2975,8 @@ function wireSearchControls() {
  * Keeps group management near people records for easier maintenance.
  */
 function wireGroupControls() {
-  const addGroupBtn = byId("add_group_btn");
-  if (addGroupBtn) {
-    addGroupBtn.addEventListener("click", async () => {
-      const nameInput = byId("new_group_name");
-      const name = nameInput?.value.trim() || "";
-      if (!name) return;
-      db.groups.push({ id: uid("group"), name, memberIds: [], updatedAt: nowIso() });
-      nameInput.value = "";
-      markDirty();
-      await saveLocal();
-      renderAll();
-    });
-  }
+  byId("group_open_lightbox_btn")?.addEventListener("click", openGroupLightbox);
+  byId("group_add_btn")?.addEventListener("click", addGroupFromLightbox);
 }
 
 function wireSettingsControls() {
@@ -2841,11 +3009,8 @@ function wireSettingsControls() {
 }
 
 function wirePeopleControls() {
-  byId("person_new_btn").addEventListener("click", () => {
-    personViewId = null;
-    personEditorState = { isNew: true, draft: createPersonDraft(null), error: "" };
-    renderPeopleManager();
-  });
+  byId("person_new_btn").addEventListener("click", openPersonLightbox);
+  byId("person_create_btn").addEventListener("click", addPersonFromLightbox);
 
   byId("person_cancel_btn").addEventListener("click", () => {
     if (personViewId) {
@@ -2913,6 +3078,7 @@ async function init() {
   wireSettingsControls();
   wirePeopleControls();
   wireTasksControls();
+  wireLightboxControls();
 
   // buttons disabled until APIs ready
   byId("auth_btn").disabled = true;
