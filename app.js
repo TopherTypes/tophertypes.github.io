@@ -2155,6 +2155,20 @@ function renderQuickSearch() {
   wireItemButtons(out);
 }
 
+/**
+ * Builds a concise calendar summary line for a meeting.
+ * @param {object} meeting Meeting record for the calendar.
+ * @returns {string} Summary string with topic, time, and 1:1 counterpart when applicable.
+ */
+function buildCalendarMeetingMeta(meeting) {
+  const topic = getTopic(meeting.topicId)?.name || "No topic";
+  const time = formatTime(meeting.datetime) || "Time TBD";
+  const template = getTemplate(meeting.templateId);
+  const oneToOneContext = template?.id === ONE_TO_ONE_TEMPLATE_ID ? getOneToOneContext(meeting) : null;
+  const counterpartLabel = oneToOneContext ? `1:1 with ${oneToOneContext.label}` : "";
+  return [topic, time, counterpartLabel].filter(Boolean).join(" • ");
+}
+
 function renderMeetingCalendar() {
   const calendar = byId("meeting_calendar");
   const rangeEl = byId("calendar_range");
@@ -2192,13 +2206,12 @@ function renderMeetingCalendar() {
     const key = dateKeyFromDate(d);
     const items = meetingsByDay.get(key) || [];
     const list = items.map(m => {
-      const topic = getTopic(m.topicId)?.name || "No topic";
       const title = m.title || "Untitled meeting";
-      const time = formatTime(m.datetime) || "Time TBD";
+      const meta = buildCalendarMeetingMeta(m);
       return `
         <div class="calendar-meeting">
           <div class="calendar-meeting__title">${escapeHtml(title)}</div>
-          <div class="calendar-meeting__meta">${escapeHtml(topic)} • ${escapeHtml(time)}</div>
+          <div class="calendar-meeting__meta">${escapeHtml(meta)}</div>
           <div class="calendar-meeting__actions">
             <button class="smallbtn" type="button" data-meeting-edit="${escapeHtml(m.id)}">Edit</button>
             <button class="smallbtn smallbtn--primary" type="button" data-meeting-notes="${escapeHtml(m.id)}">Notes</button>
@@ -2620,13 +2633,17 @@ function syncMeetingOneToOneFields() {
   if (!templateSelect || !container) return;
   const isOneToOne = templateSelect.value === ONE_TO_ONE_TEMPLATE_ID;
   container.hidden = !isOneToOne;
+  // Align ARIA state so non-1:1 meetings do not expose counterpart fields to assistive tech.
+  container.setAttribute("aria-hidden", (!isOneToOne).toString());
   const tag = container.querySelector('[data-required-tag="oneToOneTarget"]');
   if (tag) {
     tag.classList.toggle("is-hidden", !isOneToOne);
   }
+  const personSelect = byId("meeting_one_to_one_person");
+  const groupSelect = byId("meeting_one_to_one_group");
+  if (personSelect) personSelect.disabled = !isOneToOne;
+  if (groupSelect) groupSelect.disabled = !isOneToOne;
   if (!isOneToOne) {
-    const personSelect = byId("meeting_one_to_one_person");
-    const groupSelect = byId("meeting_one_to_one_group");
     if (personSelect) personSelect.value = "";
     if (groupSelect) groupSelect.value = "";
   }
