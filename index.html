@@ -298,8 +298,11 @@
             <input id="meeting_datetime" type="datetime-local" />
           </div>
           <div class="row row--space">
-            <button class="btn btn--primary" id="create_meeting_btn">Create meeting</button>
-            <button class="btn btn--ghost" data-lightbox-close="true" type="button">Cancel</button>
+            <button class="btn btn--danger" id="meeting_delete_btn" type="button" hidden>Delete meeting</button>
+            <div class="row">
+              <button class="btn btn--primary" id="create_meeting_btn">Create meeting</button>
+              <button class="btn btn--ghost" data-lightbox-close="true" type="button">Cancel</button>
+            </div>
           </div>
         </div>
       </div>

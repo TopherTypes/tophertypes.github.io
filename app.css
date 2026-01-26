@@ -263,6 +263,11 @@ hr{border:0; border-top:1px solid var(--border); margin:14px 0;}
   border-color: rgba(255,255,255,0.15);
   color: var(--muted);
 }
+.btn--danger{
+  border-color: rgba(255,106,122,0.5);
+  background: rgba(255,106,122,0.12);
+  color: var(--text);
+}
 
 /* Inputs + forms */
 input, select, textarea{
