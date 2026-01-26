@@ -1051,6 +1051,52 @@ function expandTargets(selectedPeopleIds, selectedGroupIds) {
   return Array.from(s);
 }
 
+/**
+ * Builds the 1:1 counterpart context for a meeting, if configured.
+ * @param {object} meeting Meeting record.
+ * @returns {object|null} Counterpart context with type, label, and person ids.
+ */
+function getOneToOneContext(meeting) {
+  if (!meeting) return null;
+  const personId = meeting.oneToOnePersonId || "";
+  const groupId = meeting.oneToOneGroupId || "";
+  if (personId) {
+    const person = getPerson(personId);
+    if (!person) return null;
+    return {
+      type: "person",
+      label: person.name,
+      personIds: [person.id],
+    };
+  }
+  if (groupId) {
+    const group = getGroup(groupId);
+    if (!group) return null;
+    const memberIds = expandTargets([], [group.id]);
+    return {
+      type: "group",
+      label: group.name,
+      personIds: memberIds,
+    };
+  }
+  return null;
+}
+
+/**
+ * Returns items linked to any of the provided person identifiers.
+ * @param {string[]} personIds People to match against owner/update targets.
+ * @returns {object[]} Meeting items linked to the target people.
+ */
+function getItemsLinkedToPeople(personIds) {
+  const targetSet = new Set(personIds || []);
+  if (!targetSet.size) return [];
+  return alive(db.items).filter(item => {
+    const matchesOwner = item.ownerId && targetSet.has(item.ownerId);
+    const matchesUpdateTargets = (item.updateTargets || []).some(pid => targetSet.has(pid));
+    return matchesOwner || matchesUpdateTargets;
+  });
+}
+
 /* ================================
    UI RENDERING
 =================================== */
@@ -1163,6 +1209,33 @@ function renderPeopleSelects() {
   if (!updatesSel) return;
   const people = alive(db.people).sort((a,b)=>a.name.localeCompare(b.name));
   renderSelectOptions(updatesSel, people.map(p => ({ value:p.id, label:p.name })), { placeholder: people.length ? "Choose a person…" : "No people yet" });
+}
+
+/**
+ * Populates the 1:1 counterpart selects in the meeting lightbox.
+ */
+function renderMeetingCounterpartSelects() {
+  const personSel = byId("meeting_one_to_one_person");
+  const groupSel = byId("meeting_one_to_one_group");
+  if (!personSel || !groupSel) return;
+
+  const currentPerson = personSel.value;
+  const currentGroup = groupSel.value;
+  const people = alive(db.people).sort((a,b)=>a.name.localeCompare(b.name));
+  const groups = alive(db.groups).sort((a,b)=>a.name.localeCompare(b.name));
+
+  renderSelectOptions(
+    personSel,
+    people.map(p => ({ value: p.id, label: p.name })),
+    { placeholder: people.length ? "Choose a person…" : "No people yet" }
+  );
+  renderSelectOptions(
+    groupSel,
+    groups.map(g => ({ value: g.id, label: g.name })),
+    { placeholder: groups.length ? "Choose a group…" : "No groups yet" }
+  );
+  if (currentPerson) personSel.value = currentPerson;
+  if (currentGroup) groupSel.value = currentGroup;
 }
 
 function renderPeopleManager() {
@@ -1423,15 +1496,20 @@ function renderCurrentMeetingHeader() {
 
   const topic = getTopic(meeting.topicId);
   const tpl = getTemplate(meeting.templateId);
+  const oneToOneContext = tpl?.id === ONE_TO_ONE_TEMPLATE_ID ? getOneToOneContext(meeting) : null;
+  const oneToOneLabel = oneToOneContext ? ` • 1:1 with ${escapeHtml(oneToOneContext.label)}` : "";
 
   label.innerHTML = `
     <div><strong>${escapeHtml(meeting.title || "(Untitled meeting)")}</strong></div>
-    <div class="muted">${escapeHtml(tpl?.name || "Template")} • ${escapeHtml(topic?.name || "No topic")} • ${fmtDateTime(meeting.datetime)}</div>
+    <div class="muted">${escapeHtml(tpl?.name || "Template")} • ${escapeHtml(topic?.name || "No topic")} • ${fmtDateTime(meeting.datetime)}${oneToOneLabel}</div>
   `;
+
+  const oneToOneUpdatesCard = oneToOneContext ? renderOneToOneUpdatesCard(meeting, oneToOneContext) : "";
 
   area.innerHTML = `
     <h2>Meeting notes</h2>
     <div class="muted">Template: <strong>${escapeHtml(tpl?.name || "")}</strong> • Topic: <strong>${escapeHtml(topic?.name || "")}</strong></div>
+    ${oneToOneUpdatesCard}
     <div class="sectioncard scratchpad-card">
       <div class="sectionhead">
         <h3>Meeting scratchpad</h3>
@@ -1451,6 +1529,7 @@ function renderCurrentMeetingHeader() {
 
   renderMeetingSections(meeting, tpl);
   wireMeetingScratchpad(meeting);
+  wireOneToOneUpdatesSection(meeting);
 }
 
 function wireMeetingScratchpad(meeting) {
@@ -1469,6 +1548,91 @@ function wireMeetingScratchpad(meeting) {
   field.addEventListener("input", persistScratchpad);
   field.addEventListener("blur", () => {
     persistScratchpad();
+  });
+}
+
+/**
+ * Builds the 1:1 updates card markup for the meeting notes view.
+ * @param {object} meeting Meeting record.
+ * @param {object} context 1:1 context with label and person ids.
+ * @returns {string} HTML string for the updates card.
+ */
+function renderOneToOneUpdatesCard(meeting, context) {
+  const items = getItemsLinkedToPeople(context.personIds)
+    .sort((a,b)=>Date.parse(b.updatedAt)-Date.parse(a.updatedAt));
+  const memberNames = context.personIds.map(pid => getPerson(pid)?.name).filter(Boolean);
+  const subtitle = context.type === "group"
+    ? `${escapeHtml(context.label)} • ${escapeHtml(memberNames.join(", ") || "No members yet")}`
+    : escapeHtml(context.label);
+  const listHtml = items.map(it => renderItemCard(it)).join("")
+    || `<div class="muted">No linked items yet.</div>`;
+  const itemIds = items.map(it => it.id);
+  const pendingCount = items.filter(it => (it.updateTargets || []).some(pid => context.personIds.includes(pid) && !it.updateStatus?.[pid]?.updated)).length;
+
+  return `
+    <div class="sectioncard" data-one-to-one-section data-target-ids='${escapeHtml(JSON.stringify(context.personIds))}' data-item-ids='${escapeHtml(JSON.stringify(itemIds))}'>
+      <div class="sectionhead">
+        <div>
+          <h3>1:1 updates</h3>
+          <div class="muted">${subtitle}</div>
+        </div>
+        <div class="muted">${items.length} linked item(s) • ${pendingCount} pending update(s)</div>
+      </div>
+      <div class="sectionbox sectionbox--compact">
+        <div class="list">
+          ${listHtml}
+        </div>
+      </div>
+      <div class="row row--space">
+        <div class="muted">Marks updates for ${escapeHtml(context.label)} across all linked items listed above.</div>
+        <button class="btn btn--primary" type="button" data-one-to-one-mark ${itemIds.length ? "" : "disabled"}>Mark all listed as updated</button>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Wires the 1:1 updates card button in the meeting notes view.
+ * @param {object} meeting Active meeting record for stamp metadata.
+ */
+function wireOneToOneUpdatesSection(meeting) {
+  const section = document.querySelector("[data-one-to-one-section]");
+  if (!section) return;
+  const button = section.querySelector("[data-one-to-one-mark]");
+  if (!button) return;
+
+  button.addEventListener("click", async () => {
+    const targetIds = JSON.parse(section.dataset.targetIds || "[]");
+    const itemIds = JSON.parse(section.dataset.itemIds || "[]");
+    if (!targetIds.length || !itemIds.length) {
+      alert("No linked items to mark as updated.");
+      return;
+    }
+
+    const targetLabel = targetIds.map(pid => getPerson(pid)?.name).filter(Boolean).join(", ");
+    if (!confirm(`Mark ${itemIds.length} item(s) as updated for ${targetLabel || "this counterpart"}?`)) return;
+
+    const stamp = nowIso();
+
+    for (const id of itemIds) {
+      const it = getItem(id);
+      if (!it) continue;
+      it.updateTargets = it.updateTargets || [];
+      it.updateStatus = it.updateStatus || {};
+      for (const pid of targetIds) {
+        if (!it.updateTargets.includes(pid)) it.updateTargets.push(pid);
+        it.updateStatus[pid] = {
+          updated: true,
+          updatedAt: stamp,
+          meetingId: meeting?.id || null
+        };
+      }
+      it.updatedAt = stamp;
+    }
+
+    markDirty();
+    await saveLocal();
+    renderAll();
   });
 }
 
@@ -2421,6 +2585,7 @@ function renderAll() {
   renderTemplates();
   renderTopics();
   renderPeopleSelects();
+  renderMeetingCounterpartSelects();
   renderPeopleManager();
   renderGroups();
   renderActionsFiltersOptions();
@@ -2439,11 +2604,33 @@ function renderAll() {
   if (defaultOwnerInput && document.activeElement !== defaultOwnerInput) {
     defaultOwnerInput.value = db.settings?.defaultOwnerName || "";
   }
+  syncMeetingOneToOneFields();
 }
 
 /* ================================
    ACTIONS
 =================================== */
+
+/**
+ * Updates the meeting lightbox to reflect whether 1:1 counterpart fields are required.
+ */
+function syncMeetingOneToOneFields() {
+  const templateSelect = byId("meeting_template");
+  const container = byId("meeting_one_to_one_fields");
+  if (!templateSelect || !container) return;
+  const isOneToOne = templateSelect.value === ONE_TO_ONE_TEMPLATE_ID;
+  container.hidden = !isOneToOne;
+  const tag = container.querySelector('[data-required-tag="oneToOneTarget"]');
+  if (tag) {
+    tag.classList.toggle("is-hidden", !isOneToOne);
+  }
+  if (!isOneToOne) {
+    const personSelect = byId("meeting_one_to_one_person");
+    const groupSelect = byId("meeting_one_to_one_group");
+    if (personSelect) personSelect.value = "";
+    if (groupSelect) groupSelect.value = "";
+  }
+}
 
 /**
  * Opens the task creation lightbox.
@@ -2465,10 +2652,15 @@ function closeTaskLightbox() {
 function clearMeetingForm() {
   const titleInput = byId("meeting_title");
   const datetimeInput = byId("meeting_datetime");
+  const personSelect = byId("meeting_one_to_one_person");
+  const groupSelect = byId("meeting_one_to_one_group");
   if (titleInput) titleInput.value = "";
   if (datetimeInput) {
     datetimeInput.value = toLocalDateTimeValue(nowIso());
   }
+  if (personSelect) personSelect.value = "";
+  if (groupSelect) groupSelect.value = "";
+  syncMeetingOneToOneFields();
 }
 
 /**
@@ -2506,11 +2698,16 @@ function populateMeetingForm(meeting) {
   const topicSelect = byId("meeting_topic");
   const titleInput = byId("meeting_title");
   const datetimeInput = byId("meeting_datetime");
+  const personSelect = byId("meeting_one_to_one_person");
+  const groupSelect = byId("meeting_one_to_one_group");
 
   if (templateSelect) templateSelect.value = meeting.templateId || "";
   if (topicSelect) topicSelect.value = meeting.topicId || "";
   if (titleInput) titleInput.value = meeting.title || "";
   if (datetimeInput) datetimeInput.value = toLocalDateTimeValue(meeting.datetime);
+  if (personSelect) personSelect.value = meeting.oneToOnePersonId || "";
+  if (groupSelect) groupSelect.value = meeting.oneToOneGroupId || "";
+  syncMeetingOneToOneFields();
 }
 
 /**
@@ -2717,9 +2914,22 @@ async function addTask() {
 async function saveMeetingFromLightbox() {
   const templateId = byId("meeting_template").value;
   const topicId = byId("meeting_topic").value || null;
+  const oneToOnePersonId = byId("meeting_one_to_one_person")?.value || "";
+  const oneToOneGroupId = byId("meeting_one_to_one_group")?.value || "";
+  const isOneToOneTemplate = templateId === ONE_TO_ONE_TEMPLATE_ID;
 
   if (!templateId) { alert("Choose a template."); return; }
   if (!topicId) { alert("Choose or add a topic."); return; }
+  if (isOneToOneTemplate) {
+    if (!oneToOnePersonId && !oneToOneGroupId) {
+      alert("Select a person or group for the 1:1 meeting.");
+      return;
+    }
+    if (oneToOnePersonId && oneToOneGroupId) {
+      alert("Choose either a person or a group, not both.");
+      return;
+    }
+  }
 
   const title = byId("meeting_title").value.trim() || "";
   const dt = byId("meeting_datetime").value;
@@ -2738,6 +2948,8 @@ async function saveMeetingFromLightbox() {
     meeting.topicId = topicId;
     meeting.title = title;
     meeting.datetime = datetime;
+    meeting.oneToOnePersonId = isOneToOneTemplate ? (oneToOnePersonId || null) : null;
+    meeting.oneToOneGroupId = isOneToOneTemplate ? (oneToOneGroupId || null) : null;
     meeting.updatedAt = nowIso();
   } else {
     meeting = {
@@ -2746,6 +2958,8 @@ async function saveMeetingFromLightbox() {
       topicId,
       title,
       datetime,
+      oneToOnePersonId: isOneToOneTemplate ? (oneToOnePersonId || null) : null,
+      oneToOneGroupId: isOneToOneTemplate ? (oneToOneGroupId || null) : null,
       createdAt: nowIso(),
       updatedAt: nowIso(),
     };
@@ -2801,6 +3015,12 @@ function buildMeetingSummary(meetingId) {
   lines.push(`Date: ${fmtDateTime(m.datetime)}`);
   lines.push(`Template: ${tpl?.name || ""}`);
   lines.push(`Topic: ${topic?.name || ""}`);
+  if (tpl?.id === ONE_TO_ONE_TEMPLATE_ID) {
+    const context = getOneToOneContext(m);
+    if (context) {
+      lines.push(`1:1 counterpart: ${context.label}`);
+    }
+  }
   lines.push("");
 
   const secOrder = tpl?.sections || [];
@@ -2989,6 +3209,33 @@ function wireMeetingControls() {
   byId("topic_add_btn").addEventListener("click", addTopicFromLightbox);
 
   byId("quick_search").addEventListener("input", debounce(renderQuickSearch, 150));
+
+  const templateSelect = byId("meeting_template");
+  const personSelect = byId("meeting_one_to_one_person");
+  const groupSelect = byId("meeting_one_to_one_group");
+
+  if (templateSelect) {
+    templateSelect.addEventListener("change", () => {
+      // Toggle the 1:1 counterpart controls when the template changes.
+      syncMeetingOneToOneFields();
+    });
+  }
+  if (personSelect) {
+    personSelect.addEventListener("change", () => {
+      // Ensure only one counterpart type is chosen at a time.
+      if (personSelect.value && groupSelect) {
+        groupSelect.value = "";
+      }
+    });
+  }
+  if (groupSelect) {
+    groupSelect.addEventListener("change", () => {
+      // Ensure only one counterpart type is chosen at a time.
+      if (groupSelect.value && personSelect) {
+        personSelect.value = "";
+      }
+    });
+  }
 
   document.querySelectorAll("[data-calendar-view]").forEach(btn => {
     btn.addEventListener("click", () => {
