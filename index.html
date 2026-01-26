@@ -279,6 +279,20 @@
             <label>Meeting title (optional)</label>
             <input id="meeting_title" type="text" placeholder="e.g., Weekly catch-up" />
           </div>
+          <div class="formrow" id="meeting_one_to_one_fields" hidden>
+            <label>1:1 counterpart <span class="field-tag field-tag--required is-hidden" data-required-tag="oneToOneTarget">Required</span></label>
+            <div class="grid2">
+              <div class="formrow">
+                <label>Person</label>
+                <select id="meeting_one_to_one_person"></select>
+              </div>
+              <div class="formrow">
+                <label>Group</label>
+                <select id="meeting_one_to_one_group"></select>
+              </div>
+            </div>
+            <div class="muted">Choose either a person or a group for this 1:1.</div>
+          </div>
           <div class="formrow">
             <label>Date/time</label>
             <input id="meeting_datetime" type="datetime-local" />
