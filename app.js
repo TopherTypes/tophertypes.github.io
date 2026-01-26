@@ -1640,6 +1640,8 @@ function renderMeetingSections(meeting, tpl) {
   const container = byId("sections_container");
   const people = alive(db.people).sort((a,b)=>a.name.localeCompare(b.name));
   const groups = alive(db.groups).sort((a,b)=>a.name.localeCompare(b.name));
+  // Only surface counterpart-related controls for 1:1 meetings.
+  const showUpdateTargets = tpl?.id === ONE_TO_ONE_TEMPLATE_ID;
 
   const sections = tpl?.sections || [];
   const items = alive(db.items).filter(i => i.meetingId === meeting.id);
@@ -1698,37 +1700,37 @@ function renderMeetingSections(meeting, tpl) {
               </div>
             </div>
           </div>
-
           <div class="section-form__col">
-            <div class="formrow">
-              <label>People to update ${fieldTag(false, "updateTargets")}</label>
-              <div class="update-targets" data-people-picker>
-                <div class="people-select__controls">
-                  <input data-people-input type="text" list="people_list_entry" placeholder="Type a name to add…" ${people.length ? "" : "disabled"} />
-                  <datalist id="people_list_entry">
-                    ${people.map(p => `<option value="${escapeHtml(p.name)}"></option>`).join("")}
-                  </datalist>
-                  <button class="btn btn--ghost" type="button" data-add-person ${people.length ? "" : "disabled"}>Add person</button>
-                </div>
-                <div class="people-select__selected" data-selected-list>
-                  <div class="muted" data-empty="true">No people selected yet.</div>
-                </div>
-                <div class="update-targets__groups">
-                  <div class="muted">Groups</div>
-                  <div class="picklist">
-                    ${groups.length ? groups.map(g => `
-                      <label class="checkline">
-                        <input type="checkbox" data-target-group="${escapeHtml(g.id)}" />
-                        ${escapeHtml(g.name)}
-                      </label>
-                    `).join("") : `<div class="muted">No groups yet.</div>`}
+            ${showUpdateTargets ? `
+              <div class="formrow">
+                <label>People to update ${fieldTag(false, "updateTargets")}</label>
+                <div class="update-targets" data-people-picker>
+                  <div class="people-select__controls">
+                    <input data-people-input type="text" list="people_list_entry" placeholder="Type a name to add…" ${people.length ? "" : "disabled"} />
+                    <datalist id="people_list_entry">
+                      ${people.map(p => `<option value="${escapeHtml(p.name)}"></option>`).join("")}
+                    </datalist>
+                    <button class="btn btn--ghost" type="button" data-add-person ${people.length ? "" : "disabled"}>Add person</button>
+                  </div>
+                  <div class="people-select__selected" data-selected-list>
+                    <div class="muted" data-empty="true">No people selected yet.</div>
+                  </div>
+                  <div class="update-targets__groups">
+                    <div class="muted">Groups</div>
+                    <div class="picklist">
+                      ${groups.length ? groups.map(g => `
+                        <label class="checkline">
+                          <input type="checkbox" data-target-group="${escapeHtml(g.id)}" />
+                          ${escapeHtml(g.name)}
+                        </label>
+                      `).join("") : `<div class="muted">No groups yet.</div>`}
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-
+            ` : ""}
             <div class="row row--space">
-              <div class="muted">Tip: use groups for “team”, “stakeholders”, etc.</div>
+              ${showUpdateTargets ? `<div class="muted">Tip: use groups for “team”, “stakeholders”, etc.</div>` : "<div></div>"}
               <button class="btn btn--primary" data-add-note>Add note</button>
             </div>
           </div>
