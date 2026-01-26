@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="app.css" />
 </head>
 <body>
+  <!-- Top navigation with status and sync controls -->
   <header class="topbar">
     <div class="topbar__left">
       <div class="brand">
@@ -26,7 +27,9 @@
     </div>
   </header>
 
+  <!-- Primary app layout -->
   <main class="layout">
+    <!-- Main navigation tabs -->
     <nav class="tabs">
       <button class="tab is-active" data-tab="meeting">Meeting</button>
       <button class="tab" data-tab="people">People</button>
@@ -37,6 +40,7 @@
       <button class="tab" data-tab="settings">Settings</button>
     </nav>
 
+    <!-- Meeting setup + notes workflow -->
     <section class="panel is-active" id="tab_meeting">
       <div class="meeting-shell">
         <div class="meeting-shell__header">
@@ -51,6 +55,7 @@
         </div>
       </div>
 
+      <!-- Meeting scheduling view -->
       <div class="meeting-view is-active" data-meeting-view-panel="setup" id="meeting_view_setup" role="tabpanel">
         <div class="grid2">
           <div class="card">
@@ -130,6 +135,7 @@
         </div>
       </div>
 
+      <!-- Meeting notes capture view -->
       <div class="meeting-view" data-meeting-view-panel="notes" id="meeting_view_notes" role="tabpanel" hidden>
         <div class="card meeting-notes-card" id="meeting_work_area">
           <h2>Meeting notes</h2>
@@ -138,6 +144,7 @@
       </div>
     </section>
 
+    <!-- Updates status by person -->
     <section class="panel" id="tab_updates">
       <div class="card">
         <h2>Updates by person</h2>
@@ -173,6 +180,7 @@
       </div>
     </section>
 
+    <!-- People directory & profiles -->
     <section class="panel" id="tab_people">
       <div class="grid2">
         <div class="card">
@@ -210,6 +218,7 @@
       </div>
     </section>
 
+    <!-- Action items assigned to the current user -->
     <section class="panel" id="tab_actions">
       <div class="card">
         <h2>My Actions</h2>
@@ -242,6 +251,7 @@
       </div>
     </section>
 
+    <!-- Topic management and history -->
     <section class="panel" id="tab_topics">
       <div class="card">
         <h2>Topic overview</h2>
@@ -268,6 +278,7 @@
       </div>
     </section>
 
+    <!-- Search across meetings and notes -->
     <section class="panel" id="tab_search">
       <div class="card">
         <h2>Search everything</h2>
@@ -291,6 +302,7 @@
       </div>
     </section>
 
+    <!-- Settings and data export -->
     <section class="panel" id="tab_settings">
       <div class="grid2">
         <div class="card">
@@ -337,12 +349,14 @@
     </section>
   </main>
 
+  <!-- Helpful usage reminder -->
   <footer class="footer">
     <div class="muted">
       Tip: Use it offline freely. When you’re online, hit <strong>Sync</strong>. The Drive file is stored hidden in your account.
     </div>
   </footer>
 
+  <!-- Application logic -->
   <script src="app.js"></script>
 
   <!-- Google API client library -->

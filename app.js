@@ -1,18 +1,28 @@
+/**
+ * Meeting Notes single-page app.
+ * Responsibilities:
+ * - Manage local state (IndexedDB)
+ * - Render UI and handle events
+ * - Sync with Google Drive app data
+ */
+
 /* ================================
    CONFIG
 =================================== */
 
+// Google OAuth client credentials and API config.
 // TODO: paste from Google Cloud Console
 const CLIENT_ID = "15768027919-fs339ovijr4ueh0hkn77974bmbq8d9m1.apps.googleusercontent.com";
 const API_KEY = "AIzaSyCxjOFISZK_OMVHN22OSdLf5CaLAeC9yDk";
 
+// Google Drive discovery & scopes (appData is private to the user/app).
 const DISCOVERY_DOC = "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest";
 const SCOPES = "https://www.googleapis.com/auth/drive.appdata";
 const DRIVE_FILENAME = "meeting-notes.v1.json";
 const STANDARD_TEMPLATE_ID = "tpl_standard";
 const ONE_TO_ONE_TEMPLATE_ID = "tpl_1on1";
 
-// IndexedDB
+// IndexedDB schema identifiers.
 const IDB_NAME = "meeting-notes-db";
 const IDB_VERSION = 1;
 const IDB_STORE = "kv";
@@ -45,13 +55,17 @@ let personEditorState = { isNew: false, draft: null, error: "" };
    UTIL
 =================================== */
 
+/** @returns {string} ISO-8601 timestamp for consistent audit fields. */
 function nowIso() { return new Date().toISOString(); }
+/** @returns {string} Unique ID with a stable prefix for entity types. */
 function uid(prefix) {
   // crypto.randomUUID is supported in modern browsers
   return `${prefix}_${crypto.randomUUID()}`;
 }
+/** @returns {HTMLElement|null} Convenience DOM accessor by id. */
 function byId(id){ return document.getElementById(id); }
 
+/** Updates the network status pill based on navigator connectivity. */
 function setNetStatus() {
   const el = byId("net_status");
   const online = navigator.onLine;
@@ -61,6 +75,7 @@ function setNetStatus() {
   el.style.color = "var(--text)";
 }
 
+/** Sets sync status text and colors for the header pill. */
 function setSyncStatus(text, kind="neutral") {
   const el = byId("sync_status");
   el.textContent = text;
@@ -83,6 +98,11 @@ function escapeHtml(s){
   }[c]));
 }
 
+/**
+ * Renders required field indicators.
+ * @param {boolean} required Whether a field is required.
+ * @param {string} key Optional key to target later updates.
+ */
 function fieldTag(required, key = "") {
   if (!key) {
     return required

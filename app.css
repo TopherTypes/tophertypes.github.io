@@ -1,3 +1,7 @@
+/* =========================================================
+   Meeting Notes app styles
+   Organized by: theme tokens, layout, components, utilities
+========================================================= */
 :root{
   --bg:#0b0e14;
   --panel:#121826;
@@ -14,6 +18,7 @@
   --focus:rgba(106,169,255,0.6);
 }
 
+/* Base reset + typography */
 *{box-sizing:border-box}
 html,body{height:100%}
 body{
@@ -28,6 +33,7 @@ body{
   color:var(--text);
 }
 
+/* Top navigation bar */
 .topbar{
   position:sticky;
   top:0;
@@ -55,6 +61,7 @@ body{
   background: rgba(255,255,255,0.03);
 }
 
+/* App layout and tabs */
 .layout{max-width:100%; width:100%; margin:18px auto; padding:0 16px 60px;}
 
 .tabs{
@@ -83,9 +90,11 @@ body{
   color: var(--text);
 }
 
+/* Panel switcher */
 .panel{display:none; margin-top:16px;}
 .panel.is-active{display:block;}
 
+/* Meeting workflow */
 .meeting-shell{
   margin-top:16px;
 }
@@ -111,6 +120,7 @@ body{
   padding:14px;
 }
 
+/* Cards */
 .card{
   background: rgba(18,24,38,0.55);
   border:1px solid var(--border);
@@ -119,6 +129,7 @@ body{
   box-shadow: var(--shadow);
 }
 
+/* Grid helpers */
 .grid2{
   display:grid;
   grid-template-columns: 1fr 1fr;
@@ -128,6 +139,7 @@ body{
   .grid2{grid-template-columns:1fr}
 }
 
+/* Typography + dividers */
 h2{margin:0 0 10px 0; font-size:18px;}
 hr{border:0; border-top:1px solid var(--border); margin:14px 0;}
 
@@ -136,6 +148,7 @@ hr{border:0; border-top:1px solid var(--border); margin:14px 0;}
 .muted{color:var(--muted); font-size:12px;}
 .footer{max-width:100%; margin:0 auto; padding:0 16px 24px;}
 
+/* Buttons */
 .btn{
   appearance:none;
   border:1px solid var(--border);
@@ -168,6 +181,7 @@ hr{border:0; border-top:1px solid var(--border); margin:14px 0;}
   color: var(--text);
 }
 
+/* Form fields */
 input, select, textarea{
   width:100%;
   padding:10px 12px;
