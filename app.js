@@ -54,8 +54,6 @@ let hasUnsyncedChanges = false;
 let lastSyncAt = null;
 let lastRemoteModifiedTime = null;
 const itemEditState = new Map();
-// Stores inline edit state for tasks in the Tasks module.
-const taskEditState = new Map();
 let personViewId = null;
 let personEditorState = { isNew: false, draft: null, error: "" };
 
@@ -75,6 +73,10 @@ const TASK_PRIORITY_LABELS = {
   medium: "Medium",
   high: "High"
 };
+
+// Sort weight maps for consistent task ordering.
+const TASK_PRIORITY_ORDER = { high: 0, medium: 1, low: 2 };
+const TASK_STATUS_ORDER = { todo: 0, in_progress: 1, blocked: 2, done: 3 };
 
 /* ================================
    UTIL
@@ -2235,12 +2237,20 @@ function renderTasks() {
     return statusOk && priorityOk;
   });
 
+  // Sort by due date (ascending), then priority, then status, then updated time.
   const sorted = filtered.sort((a, b) => {
-    const aDue = a.dueDate ? new Date(`${a.dueDate}T00:00:00`).getTime() : null;
-    const bDue = b.dueDate ? new Date(`${b.dueDate}T00:00:00`).getTime() : null;
-    if (aDue && bDue && aDue !== bDue) return aDue - bDue;
-    if (aDue && !bDue) return -1;
-    if (!aDue && bDue) return 1;
+    const aDue = a.dueDate ? new Date(`${a.dueDate}T00:00:00`).getTime() : Number.POSITIVE_INFINITY;
+    const bDue = b.dueDate ? new Date(`${b.dueDate}T00:00:00`).getTime() : Number.POSITIVE_INFINITY;
+    if (aDue !== bDue) return aDue - bDue;
+
+    const aPriority = TASK_PRIORITY_ORDER[a.priority] ?? TASK_PRIORITY_ORDER.medium;
+    const bPriority = TASK_PRIORITY_ORDER[b.priority] ?? TASK_PRIORITY_ORDER.medium;
+    if (aPriority !== bPriority) return aPriority - bPriority;
+
+    const aStatus = TASK_STATUS_ORDER[a.status] ?? TASK_STATUS_ORDER.todo;
+    const bStatus = TASK_STATUS_ORDER[b.status] ?? TASK_STATUS_ORDER.todo;
+    if (aStatus !== bStatus) return aStatus - bStatus;
+
     return Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
   });
 
@@ -2261,89 +2271,61 @@ function renderTasks() {
  * @returns {string} Task list markup.
  */
 function renderTaskCard(task) {
-  const state = taskEditState.get(task.id);
-  const isEditing = state?.isEditing;
-  const draft = state?.draft || createTaskDraft(task);
-  const error = state?.error || "";
-
-  const statusLabel = TASK_STATUS_LABELS[task.status] || task.status;
-  const priorityLabel = TASK_PRIORITY_LABELS[task.priority] || task.priority;
+  const statusKey = task.status || "todo";
+  const priorityKey = task.priority || "medium";
+  const statusLabel = TASK_STATUS_LABELS[statusKey] || statusKey;
+  const priorityLabel = TASK_PRIORITY_LABELS[priorityKey] || priorityKey;
   const dueLabel = formatTaskDueDate(task.dueDate);
 
-  const statusBadgeClass = task.status === "done"
-    ? "badge--ok"
-    : task.status === "blocked"
-      ? "badge--danger"
-      : task.status === "in_progress"
-        ? "badge--accent"
-        : "";
-  const priorityBadgeClass = task.priority === "high"
-    ? "badge--warn"
-    : task.priority === "low"
-      ? ""
-      : "badge--accent";
+  // Status and priority color classes for visual scanning.
+  const statusBadgeClass = `status-pill status-pill--${statusKey}`;
+  const priorityBadgeClass = `priority-pill priority-pill--${priorityKey}`;
 
   return `
-    <div class="item ${isEditing ? "item--editing" : ""}" data-task-id="${task.id}">
-      <div class="item__top">
-        <div><strong>${escapeHtml(task.title)}</strong></div>
-        <div class="badges">
+    <div class="task-card" data-task-id="${task.id}">
+      <div class="task-card__header">
+        <div>
+          <div class="task-card__title">${escapeHtml(task.title)}</div>
+          <div class="task-card__meta">Updated ${escapeHtml(fmtDateTime(task.updatedAt))}</div>
+        </div>
+        <div class="task-card__badges">
           <span class="badge ${statusBadgeClass}">${escapeHtml(statusLabel)}</span>
           <span class="badge ${priorityBadgeClass}">${escapeHtml(priorityLabel)}</span>
           <span class="badge">Due: ${escapeHtml(dueLabel)}</span>
         </div>
       </div>
-      <div class="item__text">${escapeHtml(task.notes || "No notes yet.")}</div>
-      <div class="item__meta">
-        <span>Updated ${escapeHtml(fmtDateTime(task.updatedAt))}</span>
-      </div>
-      <div class="item__actions">
-        <button class="smallbtn" data-task-action="toggle">
-          ${task.status === "done" ? "Reopen" : "Mark done"}
-        </button>
-        <button class="smallbtn" data-task-action="edit">Edit</button>
-        <button class="smallbtn smallbtn--danger" data-task-action="delete">Delete</button>
-      </div>
-      ${isEditing ? `
-        <div class="item__edit">
-          <div class="formrow">
-            <label>Title</label>
-            <input type="text" data-task-field="title" value="${escapeHtml(draft.title)}" />
+      <div class="task-card__body">
+        <div class="task-field">
+          <label>Title</label>
+          <input type="text" value="${escapeHtml(task.title)}" readonly />
+        </div>
+        <div class="task-field">
+          <label>Notes</label>
+          <textarea readonly>${escapeHtml(task.notes || "No notes yet.")}</textarea>
+        </div>
+        <div class="task-field-grid">
+          <div class="task-field">
+            <label>Due date</label>
+            <input type="text" value="${escapeHtml(dueLabel)}" readonly />
           </div>
-          <div class="formrow">
-            <label>Notes</label>
-            <textarea data-task-field="notes">${escapeHtml(draft.notes)}</textarea>
+          <div class="task-field">
+            <label>Priority</label>
+            <div class="task-pill ${priorityBadgeClass}">${escapeHtml(priorityLabel)}</div>
           </div>
-          <div class="grid2">
-            <div class="formrow">
-              <label>Due date</label>
-              <input type="date" data-task-field="dueDate" value="${escapeHtml(draft.dueDate)}" />
-            </div>
-            <div class="formrow">
-              <label>Priority</label>
-              <select data-task-field="priority">
-                <option value="low" ${draft.priority === "low" ? "selected" : ""}>Low</option>
-                <option value="medium" ${draft.priority === "medium" ? "selected" : ""}>Medium</option>
-                <option value="high" ${draft.priority === "high" ? "selected" : ""}>High</option>
-              </select>
-            </div>
-          </div>
-          <div class="formrow">
+          <div class="task-field">
             <label>Status</label>
-            <select data-task-field="status">
-              <option value="todo" ${draft.status === "todo" ? "selected" : ""}>To do</option>
-              <option value="in_progress" ${draft.status === "in_progress" ? "selected" : ""}>In progress</option>
-              <option value="blocked" ${draft.status === "blocked" ? "selected" : ""}>Blocked</option>
-              <option value="done" ${draft.status === "done" ? "selected" : ""}>Done</option>
+            <select class="task-status task-status--${statusKey}" data-task-field="status">
+              <option value="todo" ${statusKey === "todo" ? "selected" : ""}>To do</option>
+              <option value="in_progress" ${statusKey === "in_progress" ? "selected" : ""}>In progress</option>
+              <option value="blocked" ${statusKey === "blocked" ? "selected" : ""}>Blocked</option>
+              <option value="done" ${statusKey === "done" ? "selected" : ""}>Done</option>
             </select>
           </div>
-          ${error ? `<div class="item__error">${escapeHtml(error)}</div>` : ""}
-          <div class="item__actions">
-            <button class="smallbtn" data-task-action="save">Save</button>
-            <button class="smallbtn" data-task-action="cancel">Cancel</button>
-          </div>
         </div>
-      ` : ""}
+      </div>
+      <div class="task-card__actions">
+        <button class="smallbtn smallbtn--danger" data-task-action="delete">Delete</button>
+      </div>
     </div>
   `;
 }
@@ -2353,73 +2335,39 @@ function renderTaskCard(task) {
  * @param {HTMLElement} container Task list container.
  */
 function wireTaskList(container) {
-  container.querySelectorAll("[data-task-action]").forEach(btn => {
-    btn.addEventListener("click", async () => {
-      const action = btn.getAttribute("data-task-action");
-      const card = btn.closest("[data-task-id]");
-      if (!action || !card) return;
+  // Handle status updates inline so only the status remains editable.
+  container.querySelectorAll("[data-task-field='status']").forEach(select => {
+    select.addEventListener("change", async () => {
+      const card = select.closest("[data-task-id]");
+      if (!card) return;
       const taskId = card.getAttribute("data-task-id");
       const task = getTask(taskId);
       if (!task) return;
 
-      if (action === "toggle") {
-        task.status = task.status === "done" ? "todo" : "done";
-        task.updatedAt = nowIso();
-        markDirty();
-        await saveLocal();
-        renderTasks();
-        return;
-      }
+      task.status = select.value || "todo";
+      task.updatedAt = nowIso();
+      select.className = `task-status task-status--${task.status}`;
+      markDirty();
+      await saveLocal();
+      renderTasks();
+    });
+  });
 
-      if (action === "edit") {
-        taskEditState.set(taskId, { isEditing: true, draft: createTaskDraft(task), error: "" });
-        renderTasks();
-        return;
-      }
+  container.querySelectorAll("[data-task-action='delete']").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const card = btn.closest("[data-task-id]");
+      if (!card) return;
+      const taskId = card.getAttribute("data-task-id");
+      const task = getTask(taskId);
+      if (!task) return;
 
-      if (action === "cancel") {
-        taskEditState.delete(taskId);
-        renderTasks();
-        return;
-      }
-
-      if (action === "delete") {
-        const confirmDelete = confirm("Delete this task? This cannot be undone.");
-        if (!confirmDelete) return;
-        task.deleted = true;
-        task.updatedAt = nowIso();
-        taskEditState.delete(taskId);
-        markDirty();
-        await saveLocal();
-        renderTasks();
-        return;
-      }
-
-      if (action === "save") {
-        const draft = {
-          title: card.querySelector("[data-task-field='title']")?.value || "",
-          notes: card.querySelector("[data-task-field='notes']")?.value || "",
-          dueDate: card.querySelector("[data-task-field='dueDate']")?.value || "",
-          priority: card.querySelector("[data-task-field='priority']")?.value || "medium",
-          status: card.querySelector("[data-task-field='status']")?.value || "todo"
-        };
-        const errs = validateTaskDraft(draft);
-        if (errs.length) {
-          taskEditState.set(taskId, { isEditing: true, draft, error: errs.join(" ") });
-          renderTasks();
-          return;
-        }
-        task.title = draft.title.trim();
-        task.notes = draft.notes.trim();
-        task.dueDate = draft.dueDate;
-        task.priority = draft.priority;
-        task.status = draft.status;
-        task.updatedAt = nowIso();
-        taskEditState.delete(taskId);
-        markDirty();
-        await saveLocal();
-        renderTasks();
-      }
+      const confirmDelete = confirm("Delete this task? This cannot be undone.");
+      if (!confirmDelete) return;
+      task.deleted = true;
+      task.updatedAt = nowIso();
+      markDirty();
+      await saveLocal();
+      renderTasks();
     });
   });
 }
@@ -2451,6 +2399,27 @@ function renderAll() {
 /* ================================
    ACTIONS
 =================================== */
+
+/**
+ * Opens the task creation lightbox.
+ */
+function openTaskLightbox() {
+  const lightbox = byId("task_lightbox");
+  if (!lightbox) return;
+  lightbox.classList.add("is-visible");
+  lightbox.setAttribute("aria-hidden", "false");
+  byId("task_title")?.focus();
+}
+
+/**
+ * Closes the task creation lightbox and clears draft errors.
+ */
+function closeTaskLightbox() {
+  const lightbox = byId("task_lightbox");
+  if (!lightbox) return;
+  lightbox.classList.remove("is-visible");
+  lightbox.setAttribute("aria-hidden", "true");
+}
 
 /**
  * Reads the task creation form fields into a draft object.
@@ -2509,6 +2478,7 @@ async function addTask() {
 
   db.tasks.push(task);
   clearTaskForm();
+  closeTaskLightbox();
   markDirty();
   await saveLocal();
   renderTasks();
@@ -2711,8 +2681,20 @@ function wireModules() {
 }
 
 function wireTasksControls() {
+  // Task lightbox triggers.
+  byId("task_open_modal_btn")?.addEventListener("click", openTaskLightbox);
   byId("task_add_btn")?.addEventListener("click", addTask);
   byId("task_clear_btn")?.addEventListener("click", clearTaskForm);
+  byId("task_lightbox")?.addEventListener("click", (event) => {
+    if (event.target?.matches("[data-lightbox-close]")) {
+      closeTaskLightbox();
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeTaskLightbox();
+    }
+  });
   byId("task_filter_status")?.addEventListener("change", (event) => {
     taskFilters.status = event.target.value;
     saveMeta().catch(console.error);
