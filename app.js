@@ -1252,10 +1252,44 @@ function renderCurrentMeetingHeader() {
   area.innerHTML = `
     <h2>Meeting notes</h2>
     <div class="muted">Template: <strong>${escapeHtml(tpl?.name || "")}</strong> • Topic: <strong>${escapeHtml(topic?.name || "")}</strong></div>
+    <div class="sectioncard scratchpad-card">
+      <div class="sectionhead">
+        <h3>Meeting scratchpad</h3>
+        <div class="muted">Capture rich text during the meeting, then move items into the structured sections below.</div>
+      </div>
+      <div
+        class="scratchpad-field"
+        data-scratchpad
+        contenteditable="true"
+        role="textbox"
+        aria-multiline="true"
+        data-placeholder="Type meeting notes here..."
+      ></div>
+    </div>
     <div id="sections_container"></div>
   `;
 
   renderMeetingSections(meeting, tpl);
+  wireMeetingScratchpad(meeting);
+}
+
+function wireMeetingScratchpad(meeting) {
+  const field = document.querySelector("[data-scratchpad]");
+  if (!field) return;
+  field.innerHTML = meeting.scratchpadHtml || "";
+
+  const persistScratchpad = debounce(() => {
+    if (!currentMeetingId || meeting.id !== currentMeetingId) return;
+    meeting.scratchpadHtml = field.innerHTML;
+    meeting.updatedAt = nowIso();
+    markDirty();
+    saveLocal();
+  }, 250);
+
+  field.addEventListener("input", persistScratchpad);
+  field.addEventListener("blur", () => {
+    persistScratchpad();
+  });
 }
 
 function renderMeetingSections(meeting, tpl) {
