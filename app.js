@@ -2722,13 +2722,15 @@ function populateMeetingForm(meeting) {
   const datetimeInput = byId("meeting_datetime");
   const personSelect = byId("meeting_one_to_one_person");
   const groupSelect = byId("meeting_one_to_one_group");
+  // Only surface counterpart selections when the meeting uses the 1:1 template.
+  const isOneToOneTemplate = meeting.templateId === ONE_TO_ONE_TEMPLATE_ID;
 
   if (templateSelect) templateSelect.value = meeting.templateId || "";
   if (topicSelect) topicSelect.value = meeting.topicId || "";
   if (titleInput) titleInput.value = meeting.title || "";
   if (datetimeInput) datetimeInput.value = toLocalDateTimeValue(meeting.datetime);
-  if (personSelect) personSelect.value = meeting.oneToOnePersonId || "";
-  if (groupSelect) groupSelect.value = meeting.oneToOneGroupId || "";
+  if (personSelect) personSelect.value = isOneToOneTemplate ? (meeting.oneToOnePersonId || "") : "";
+  if (groupSelect) groupSelect.value = isOneToOneTemplate ? (meeting.oneToOneGroupId || "") : "";
   syncMeetingOneToOneFields();
 }
 
