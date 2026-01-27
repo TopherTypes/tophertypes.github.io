@@ -1558,16 +1558,24 @@ function wireMeetingScratchpad(meeting) {
  * @returns {string} HTML string for the updates card.
  */
 function renderOneToOneUpdatesCard(meeting, context) {
-  const items = getItemsLinkedToPeople(context.personIds)
+  const linkedItems = getItemsLinkedToPeople(context.personIds)
     .sort((a,b)=>Date.parse(b.updatedAt)-Date.parse(a.updatedAt));
+  // Only surface items that still need updates for the 1:1 counterpart.
+  const pendingItems = linkedItems.filter(item => {
+    const targets = new Set([item.ownerId, ...(item.updateTargets || [])].filter(Boolean));
+    return context.personIds.some(personId => {
+      if (!targets.has(personId)) return false;
+      return !item.updateStatus?.[personId]?.updated;
+    });
+  });
   const memberNames = context.personIds.map(pid => getPerson(pid)?.name).filter(Boolean);
   const subtitle = context.type === "group"
     ? `${escapeHtml(context.label)} • ${escapeHtml(memberNames.join(", ") || "No members yet")}`
     : escapeHtml(context.label);
-  const listHtml = items.map(it => renderItemCard(it)).join("")
-    || `<div class="muted">No linked items yet.</div>`;
-  const itemIds = items.map(it => it.id);
-  const pendingCount = items.filter(it => (it.updateTargets || []).some(pid => context.personIds.includes(pid) && !it.updateStatus?.[pid]?.updated)).length;
+  const listHtml = pendingItems.map(it => renderItemCard(it)).join("")
+    || `<div class="muted">No pending updates for this counterpart yet.</div>`;
+  const itemIds = pendingItems.map(it => it.id);
+  const pendingCount = pendingItems.length;
 
   return `
     <div class="sectioncard" data-one-to-one-section data-target-ids='${escapeHtml(JSON.stringify(context.personIds))}' data-item-ids='${escapeHtml(JSON.stringify(itemIds))}'>
@@ -1576,7 +1584,7 @@ function renderOneToOneUpdatesCard(meeting, context) {
           <h3>1:1 updates</h3>
           <div class="muted">${subtitle}</div>
         </div>
-        <div class="muted">${items.length} linked item(s) • ${pendingCount} pending update(s)</div>
+        <div class="muted">${linkedItems.length} linked item(s) • ${pendingCount} pending update(s)</div>
       </div>
       <div class="sectionbox sectionbox--compact">
         <div class="list">
@@ -2667,10 +2675,21 @@ function closeTaskLightbox() {
  * Clears the meeting creation form inputs so each draft starts clean.
  */
 function clearMeetingForm() {
+  // Default the meeting type to a non-1:1 template so counterpart fields stay hidden initially.
+  const templateSelect = byId("meeting_template");
   const titleInput = byId("meeting_title");
   const datetimeInput = byId("meeting_datetime");
   const personSelect = byId("meeting_one_to_one_person");
   const groupSelect = byId("meeting_one_to_one_group");
+  if (templateSelect) {
+    const hasStandard = Array.from(templateSelect.options).some(opt => opt.value === STANDARD_TEMPLATE_ID);
+    if (hasStandard) {
+      templateSelect.value = STANDARD_TEMPLATE_ID;
+    } else if (templateSelect.value === ONE_TO_ONE_TEMPLATE_ID) {
+      const fallback = Array.from(templateSelect.options).find(opt => opt.value && opt.value !== ONE_TO_ONE_TEMPLATE_ID);
+      templateSelect.value = fallback?.value || templateSelect.value;
+    }
+  }
   if (titleInput) titleInput.value = "";
   if (datetimeInput) {
     datetimeInput.value = toLocalDateTimeValue(nowIso());
