@@ -2988,12 +2988,9 @@ function renderTasks() {
         <div class="task-row task-row--header">
           <div>Task</div>
           <div>Notes</div>
-          <div>Owner</div>
           <div>Status</div>
           <div>Priority</div>
           <div>Due date</div>
-          <div>Link</div>
-          <div>Update targets</div>
           <div>Actions</div>
         </div>
         <div class="task-table__body">
@@ -3014,7 +3011,6 @@ function renderTaskCard(task) {
   const statusKey = task.status || "todo";
   const priorityKey = task.priority || "medium";
   const isLinkedAction = task.sourceType === "item";
-  const people = alive(db.people).sort((a,b)=>a.name.localeCompare(b.name));
   const meeting = task.meetingId ? getMeeting(task.meetingId) : null;
   const topic = task.topicId ? getTopic(task.topicId) : null;
   const sourceMeta = isLinkedAction ? "Linked action" : "Personal task";
@@ -3024,16 +3020,7 @@ function renderTaskCard(task) {
       meeting ? `Meeting: ${meeting.title || "Untitled"}` : null,
       topic ? `Topic: ${topic.name}` : null,
     ].filter(Boolean).join(" • ");
-  const ownerName = task.ownerId ? getPerson(task.ownerId)?.name || "Unknown owner" : "";
-  const ownerOptions = [
-    `<option value="">Unassigned</option>`,
-    ownerName && !people.some(p => p.id === task.ownerId)
-      ? `<option value="${escapeHtml(task.ownerId)}" selected>Unknown owner</option>`
-      : "",
-    ...people.map(p => `<option value="${escapeHtml(p.id)}"${p.id === task.ownerId ? " selected" : ""}>${escapeHtml(p.name)}</option>`)
-  ].join("");
-  const updateTargetsLabel = formatTargetNames(task.updateTargets);
-  const updateProgress = buildUpdateProgressLabel(task);
+  // Hidden columns remain in data, but are intentionally not shown in the condensed layout.
 
   return `
     <div class="task-row" data-task-id="${task.id}" data-task-source="${escapeHtml(task.sourceType || "task")}">
@@ -3047,11 +3034,6 @@ function renderTaskCard(task) {
       </div>
       <div class="task-cell">
         <textarea class="task-input" data-task-field="notes" placeholder="Add supporting notes...">${escapeHtml(task.notes || "")}</textarea>
-      </div>
-      <div class="task-cell">
-        <select class="task-input" data-task-field="ownerId">
-          ${ownerOptions}
-        </select>
       </div>
       <div class="task-cell">
         <select class="task-status task-status--${statusKey}" data-task-field="status">
@@ -3071,18 +3053,8 @@ function renderTaskCard(task) {
       <div class="task-cell">
         <input class="task-input" type="date" value="${escapeHtml(task.dueDate || "")}" data-task-field="dueDate" />
       </div>
-      <div class="task-cell">
-        <input class="task-input" type="url" value="${escapeHtml(task.link || "")}" placeholder="https://…" data-task-field="link" />
-      </div>
-      <div class="task-cell">
-        <input class="task-input" type="text" value="${escapeHtml(updateTargetsLabel)}" placeholder="Add names separated by commas" data-task-field="updateTargets" data-task-targets="${escapeHtml(updateTargetsLabel)}" />
-        <div class="task-row__meta">
-          <span data-task-display="update-progress">${escapeHtml(updateProgress)}</span>
-        </div>
-      </div>
       <div class="task-cell task-cell--actions">
         ${isLinkedAction && task.meetingId ? `<button class="smallbtn" data-task-action="open-meeting" data-task-meeting="${escapeHtml(task.meetingId)}">Open meeting</button>` : ""}
-        ${task.link ? `<button class="smallbtn" data-task-action="open-link" data-task-link="${escapeHtml(task.link)}">Open link</button>` : ""}
         <button class="smallbtn smallbtn--danger" data-task-action="delete">Delete</button>
       </div>
     </div>
