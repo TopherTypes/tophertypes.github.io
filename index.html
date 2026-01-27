@@ -492,8 +492,8 @@
           </div>
           <div class="grid2">
             <div class="formrow">
-              <label>Due date</label>
-              <input id="task_due" type="date" />
+              <label>Owner</label>
+              <select id="task_owner"></select>
             </div>
             <div class="formrow">
               <label>Priority</label>
@@ -504,6 +504,16 @@
               </select>
             </div>
           </div>
+          <div class="grid2">
+            <div class="formrow">
+              <label>Due date</label>
+              <input id="task_due" type="date" />
+            </div>
+            <div class="formrow">
+              <label>Link</label>
+              <input id="task_link" type="url" placeholder="https://…" />
+            </div>
+          </div>
           <div class="formrow">
             <label>Status</label>
             <select id="task_status">
@@ -512,6 +522,11 @@
               <option value="blocked">Blocked</option>
               <option value="done">Done</option>
             </select>
+          </div>
+          <div class="formrow">
+            <label>Update targets</label>
+            <input id="task_update_targets" type="text" list="task_targets_list" placeholder="Add names separated by commas" />
+            <datalist id="task_targets_list"></datalist>
           </div>
           <div class="row row--space">
             <button class="btn btn--primary" id="task_add_btn">Add task</button>
