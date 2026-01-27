@@ -447,7 +447,9 @@ label{
 }
 .task-card__badges{
   display:flex;
-  gap:6px;
+  justify-content:flex-end;
+  align-items:center;
+  gap:8px;
   flex-wrap:wrap;
 }
 /* Task badge row: more tactile, high-contrast pills for quick scanning. */
@@ -481,7 +483,8 @@ label{
   color: var(--muted);
 }
 .task-field input,
-.task-field textarea{
+.task-field textarea,
+.task-field select{
   background: rgba(255,255,255,0.04);
   border:1px solid var(--border);
   border-radius:12px;
@@ -512,58 +515,101 @@ label{
   letter-spacing:0.2px;
   box-shadow: 0 12px 20px rgba(2,5,15,0.35), inset 0 1px 0 rgba(255,255,255,0.08);
 }
-.task-status{
+/* Task select elements use elevated contrast for readable status/priority text. */
+.task-status,
+.task-priority{
+  appearance:none;
+  --select-bg: rgba(255,255,255,0.04);
   padding:8px 10px;
+  padding-right:32px;
   border-radius:10px;
   border:1px solid var(--border);
-  background: rgba(255,255,255,0.04);
+  background-color: transparent;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 20 20'%3E%3Cpath fill='%23e8eefc' d='M5.3 7.7a1 1 0 0 1 1.4 0L10 11l3.3-3.3a1 1 0 1 1 1.4 1.4l-4 4a1 1 0 0 1-1.4 0l-4-4a1 1 0 0 1 0-1.4z'/%3E%3C/svg%3E"),
+    var(--select-bg);
+  background-repeat: no-repeat, no-repeat;
+  background-position: right 10px center, center;
+  background-size: 14px, cover;
+  color: var(--text);
+  font-weight:600;
+  letter-spacing:0.2px;
+  text-shadow: 0 1px 2px rgba(3,6,12,0.6);
+}
+.task-status option,
+.task-priority option{
+  background-color: rgba(10,14,22,0.98);
   color: var(--text);
 }
 /* Status + priority variants: gradient fills to emphasize state at a glance. */
-.task-status--todo,
+.task-status--todo{
+  border-color: rgba(124,155,255,0.5);
+  --select-bg: linear-gradient(140deg, rgba(124,155,255,0.35), rgba(124,155,255,0.12));
+  color: var(--text);
+}
 .status-pill--todo{
   border-color: rgba(124,155,255,0.5);
-  background:
-    linear-gradient(140deg, rgba(124,155,255,0.35), rgba(124,155,255,0.12));
+  background: linear-gradient(140deg, rgba(124,155,255,0.35), rgba(124,155,255,0.12));
   color: var(--text);
 }
-.task-status--in_progress,
+.task-status--in_progress{
+  border-color: rgba(94,242,217,0.55);
+  --select-bg: linear-gradient(140deg, rgba(94,242,217,0.35), rgba(94,242,217,0.12));
+  color: var(--text);
+}
 .status-pill--in_progress{
   border-color: rgba(94,242,217,0.55);
-  background:
-    linear-gradient(140deg, rgba(94,242,217,0.35), rgba(94,242,217,0.12));
+  background: linear-gradient(140deg, rgba(94,242,217,0.35), rgba(94,242,217,0.12));
   color: var(--text);
 }
-.task-status--blocked,
+.task-status--blocked{
+  border-color: rgba(255,106,122,0.7);
+  --select-bg: linear-gradient(140deg, rgba(255,106,122,0.35), rgba(255,106,122,0.12));
+  color: var(--text);
+}
 .status-pill--blocked{
   border-color: rgba(255,106,122,0.7);
-  background:
-    linear-gradient(140deg, rgba(255,106,122,0.35), rgba(255,106,122,0.12));
+  background: linear-gradient(140deg, rgba(255,106,122,0.35), rgba(255,106,122,0.12));
   color: var(--text);
 }
-.task-status--done,
+.task-status--done{
+  border-color: rgba(82,255,168,0.6);
+  --select-bg: linear-gradient(140deg, rgba(82,255,168,0.32), rgba(82,255,168,0.12));
+  color: var(--text);
+}
 .status-pill--done{
   border-color: rgba(82,255,168,0.6);
-  background:
-    linear-gradient(140deg, rgba(82,255,168,0.32), rgba(82,255,168,0.12));
+  background: linear-gradient(140deg, rgba(82,255,168,0.32), rgba(82,255,168,0.12));
+  color: var(--text);
+}
+.task-priority--low{
+  border-color: rgba(124,155,255,0.4);
+  --select-bg: linear-gradient(140deg, rgba(124,155,255,0.25), rgba(124,155,255,0.08));
   color: var(--text);
 }
 .priority-pill--low{
   border-color: rgba(124,155,255,0.4);
-  background:
-    linear-gradient(140deg, rgba(124,155,255,0.25), rgba(124,155,255,0.08));
+  background: linear-gradient(140deg, rgba(124,155,255,0.25), rgba(124,155,255,0.08));
+  color: var(--text);
+}
+.task-priority--medium{
+  border-color: rgba(247,178,106,0.6);
+  --select-bg: linear-gradient(140deg, rgba(247,178,106,0.3), rgba(247,178,106,0.1));
   color: var(--text);
 }
 .priority-pill--medium{
   border-color: rgba(247,178,106,0.6);
-  background:
-    linear-gradient(140deg, rgba(247,178,106,0.3), rgba(247,178,106,0.1));
+  background: linear-gradient(140deg, rgba(247,178,106,0.3), rgba(247,178,106,0.1));
+  color: var(--text);
+}
+.task-priority--high{
+  border-color: rgba(255,106,122,0.7);
+  --select-bg: linear-gradient(140deg, rgba(255,106,122,0.32), rgba(255,106,122,0.12));
   color: var(--text);
 }
 .priority-pill--high{
   border-color: rgba(255,106,122,0.7);
-  background:
-    linear-gradient(140deg, rgba(255,106,122,0.32), rgba(255,106,122,0.12));
+  background: linear-gradient(140deg, rgba(255,106,122,0.32), rgba(255,106,122,0.12));
   color: var(--text);
 }
 
