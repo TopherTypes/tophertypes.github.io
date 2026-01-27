@@ -2744,8 +2744,13 @@ function renderTaskCard(task) {
   const priorityLabel = TASK_PRIORITY_LABELS[priorityKey] || priorityKey;
   const dueLabel = formatTaskDueDate(task.dueDate);
   const isLinkedAction = task.sourceType === "item";
+  const isEditableTask = task.sourceType === "task";
+  const readonlyAttr = isEditableTask ? "" : "readonly";
+  const disabledAttr = isEditableTask ? "" : "disabled";
   const detailsLabel = isLinkedAction ? "Details" : "Notes";
-  const detailsText = task.notes || (isLinkedAction ? "No details captured yet." : "No notes yet.");
+  const detailsText = isLinkedAction
+    ? (task.notes || "No details captured yet.")
+    : (task.notes || "");
   const sourceBadge = isLinkedAction ? `<span class="badge badge--accent">Action item</span>` : "";
   const sourceMeta = isLinkedAction ? " • Linked from meetings" : "";
 
@@ -2757,33 +2762,37 @@ function renderTaskCard(task) {
     <div class="task-card" data-task-id="${task.id}" data-task-source="${escapeHtml(task.sourceType || "task")}">
       <div class="task-card__header">
         <div>
-          <div class="task-card__title">${escapeHtml(task.title)}</div>
+          <div class="task-card__title" data-task-display="title">${escapeHtml(task.title)}</div>
           <div class="task-card__meta">Updated ${escapeHtml(fmtDateTime(task.updatedAt))}${sourceMeta}</div>
         </div>
         <div class="task-card__badges">
           ${sourceBadge}
-          <span class="badge ${statusBadgeClass}">${escapeHtml(statusLabel)}</span>
-          <span class="badge ${priorityBadgeClass}">${escapeHtml(priorityLabel)}</span>
-          <span class="badge">Due: ${escapeHtml(dueLabel)}</span>
+          <span class="badge ${statusBadgeClass}" data-task-badge="status">${escapeHtml(statusLabel)}</span>
+          <span class="badge ${priorityBadgeClass}" data-task-badge="priority">${escapeHtml(priorityLabel)}</span>
+          <span class="badge" data-task-badge="due">Due: ${escapeHtml(dueLabel)}</span>
         </div>
       </div>
       <div class="task-card__body">
         <div class="task-field">
           <label>Title</label>
-          <input type="text" value="${escapeHtml(task.title)}" readonly />
+          <input type="text" value="${escapeHtml(task.title)}" data-task-field="title" ${readonlyAttr} />
         </div>
         <div class="task-field">
           <label>${escapeHtml(detailsLabel)}</label>
-          <textarea readonly>${escapeHtml(detailsText)}</textarea>
+          <textarea data-task-field="notes" ${readonlyAttr} ${isLinkedAction ? "" : `placeholder="No notes yet."`}>${escapeHtml(detailsText)}</textarea>
         </div>
         <div class="task-field-grid">
           <div class="task-field">
             <label>Due date</label>
-            <input type="text" value="${escapeHtml(dueLabel)}" readonly />
+            <input type="date" value="${escapeHtml(task.dueDate || "")}" data-task-field="dueDate" ${disabledAttr} />
           </div>
           <div class="task-field">
             <label>Priority</label>
-            <div class="task-pill ${priorityBadgeClass}">${escapeHtml(priorityLabel)}</div>
+            <select class="task-priority task-priority--${priorityKey}" data-task-field="priority" ${disabledAttr}>
+              <option value="low" ${priorityKey === "low" ? "selected" : ""}>Low</option>
+              <option value="medium" ${priorityKey === "medium" ? "selected" : ""}>Medium</option>
+              <option value="high" ${priorityKey === "high" ? "selected" : ""}>High</option>
+            </select>
           </div>
           <div class="task-field">
             <label>Status</label>
@@ -2810,30 +2819,103 @@ function renderTaskCard(task) {
  * @param {HTMLElement} container Task list container.
  */
 function wireTaskList(container) {
-  // Handle status updates inline so only the status remains editable.
-  container.querySelectorAll("[data-task-field='status']").forEach(select => {
-    select.addEventListener("change", async () => {
-      const card = select.closest("[data-task-id]");
+  /**
+   * Updates a task or linked action item record, then schedules persistence.
+   * @param {string} taskId Task or item id.
+   * @param {string} sourceType "task" or "item".
+   * @param {object} updates Key/value field updates.
+   */
+  const applyTaskUpdates = (taskId, sourceType, updates) => {
+    if (sourceType === "item") {
+      const item = getItem(taskId);
+      if (!item) return;
+      if (typeof updates.title === "string") item.text = updates.title;
+      if (typeof updates.dueDate === "string") item.dueDate = updates.dueDate;
+      if (typeof updates.status === "string") item.status = mapTaskStatusToActionStatus(updates.status);
+      item.updatedAt = nowIso();
+      return;
+    }
+
+    const task = getTask(taskId);
+    if (!task) return;
+    if (typeof updates.title === "string") task.title = updates.title;
+    if (typeof updates.notes === "string") task.notes = updates.notes;
+    if (typeof updates.dueDate === "string") task.dueDate = updates.dueDate;
+    if (typeof updates.priority === "string") task.priority = updates.priority;
+    if (typeof updates.status === "string") task.status = updates.status;
+    task.updatedAt = nowIso();
+  };
+
+  /**
+   * Schedules a throttled persistence write to keep typing responsive.
+   */
+  const persistTaskChanges = debounce(async () => {
+    markDirty();
+    await saveLocal();
+  }, 350);
+
+  /**
+   * Updates card-level UI elements after edits without forcing a full re-render.
+   * @param {HTMLElement} card Task card element.
+   * @param {object} updates Updated field values.
+   */
+  const syncTaskCardDisplay = (card, updates) => {
+    if (updates.title !== undefined) {
+      const titleEl = card.querySelector("[data-task-display='title']");
+      if (titleEl) titleEl.textContent = updates.title || "Untitled";
+    }
+
+    if (updates.status !== undefined) {
+      const statusKey = updates.status || "todo";
+      const statusLabel = TASK_STATUS_LABELS[statusKey] || statusKey;
+      const statusBadge = card.querySelector("[data-task-badge='status']");
+      if (statusBadge) {
+        statusBadge.className = `badge status-pill status-pill--${statusKey}`;
+        statusBadge.textContent = statusLabel;
+      }
+    }
+
+    if (updates.priority !== undefined) {
+      const priorityKey = updates.priority || "medium";
+      const priorityLabel = TASK_PRIORITY_LABELS[priorityKey] || priorityKey;
+      const priorityBadge = card.querySelector("[data-task-badge='priority']");
+      if (priorityBadge) {
+        priorityBadge.className = `badge priority-pill priority-pill--${priorityKey}`;
+        priorityBadge.textContent = priorityLabel;
+      }
+    }
+
+    if (updates.dueDate !== undefined) {
+      const dueBadge = card.querySelector("[data-task-badge='due']");
+      if (dueBadge) dueBadge.textContent = `Due: ${formatTaskDueDate(updates.dueDate)}`;
+    }
+  };
+
+  // Inline edits for all editable task fields (title, notes, due date, priority, status).
+  container.querySelectorAll("[data-task-field]").forEach(field => {
+    const fieldName = field.getAttribute("data-task-field");
+    if (!fieldName) return;
+
+    const eventName = field.tagName === "SELECT" ? "change" : "input";
+    field.addEventListener(eventName, () => {
+      const card = field.closest("[data-task-id]");
       if (!card) return;
       const taskId = card.getAttribute("data-task-id");
       const sourceType = card.getAttribute("data-task-source") || "task";
 
-      if (sourceType === "item") {
-        const item = getItem(taskId);
-        if (!item) return;
-        item.status = mapTaskStatusToActionStatus(select.value || "todo");
-        item.updatedAt = nowIso();
-      } else {
-        const task = getTask(taskId);
-        if (!task) return;
-        task.status = select.value || "todo";
-        task.updatedAt = nowIso();
+      const value = field.value ?? "";
+      applyTaskUpdates(taskId, sourceType, { [fieldName]: value });
+      syncTaskCardDisplay(card, { [fieldName]: value });
+
+      if (fieldName === "status") {
+        field.className = `task-status task-status--${value || "todo"}`;
       }
 
-      select.className = `task-status task-status--${select.value || "todo"}`;
-      markDirty();
-      await saveLocal();
-      renderTasks();
+      if (fieldName === "priority") {
+        field.className = `task-priority task-priority--${value || "medium"}`;
+      }
+
+      persistTaskChanges();
     });
   });
 
