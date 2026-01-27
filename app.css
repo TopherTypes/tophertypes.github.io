@@ -450,6 +450,18 @@ label{
   gap:6px;
   flex-wrap:wrap;
 }
+/* Task badge row: more tactile, high-contrast pills for quick scanning. */
+.task-card__badges .badge{
+  font-size:11px;
+  padding:6px 12px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,0.12);
+  background:
+    linear-gradient(140deg, rgba(255,255,255,0.06), rgba(255,255,255,0.01));
+  color: var(--text);
+  letter-spacing:0.2px;
+  box-shadow: 0 10px 20px rgba(2,5,15,0.35), inset 0 1px 0 rgba(255,255,255,0.08);
+}
 .task-card__body{
   display:flex;
   flex-direction:column;
@@ -489,12 +501,16 @@ label{
   display:inline-flex;
   align-items:center;
   justify-content:center;
-  padding:6px 10px;
+  padding:7px 12px;
   border-radius:999px;
-  border:1px solid var(--border);
+  border:1px solid rgba(255,255,255,0.12);
   font-size:12px;
-  background: rgba(255,255,255,0.04);
+  font-weight:600;
+  background:
+    linear-gradient(150deg, rgba(255,255,255,0.06), rgba(255,255,255,0.01));
   color: var(--text);
+  letter-spacing:0.2px;
+  box-shadow: 0 12px 20px rgba(2,5,15,0.35), inset 0 1px 0 rgba(255,255,255,0.08);
 }
 .task-status{
   padding:8px 10px;
@@ -503,43 +519,51 @@ label{
   background: rgba(255,255,255,0.04);
   color: var(--text);
 }
+/* Status + priority variants: gradient fills to emphasize state at a glance. */
 .task-status--todo,
 .status-pill--todo{
-  border-color: rgba(124,155,255,0.4);
-  background: rgba(124,155,255,0.15);
+  border-color: rgba(124,155,255,0.5);
+  background:
+    linear-gradient(140deg, rgba(124,155,255,0.35), rgba(124,155,255,0.12));
   color: var(--text);
 }
 .task-status--in_progress,
 .status-pill--in_progress{
-  border-color: rgba(94,242,217,0.45);
-  background: rgba(94,242,217,0.18);
+  border-color: rgba(94,242,217,0.55);
+  background:
+    linear-gradient(140deg, rgba(94,242,217,0.35), rgba(94,242,217,0.12));
   color: var(--text);
 }
 .task-status--blocked,
 .status-pill--blocked{
-  border-color: rgba(255,106,122,0.6);
-  background: rgba(255,106,122,0.18);
+  border-color: rgba(255,106,122,0.7);
+  background:
+    linear-gradient(140deg, rgba(255,106,122,0.35), rgba(255,106,122,0.12));
   color: var(--text);
 }
 .task-status--done,
 .status-pill--done{
-  border-color: rgba(82,255,168,0.5);
-  background: rgba(82,255,168,0.16);
+  border-color: rgba(82,255,168,0.6);
+  background:
+    linear-gradient(140deg, rgba(82,255,168,0.32), rgba(82,255,168,0.12));
   color: var(--text);
 }
 .priority-pill--low{
-  border-color: rgba(124,155,255,0.25);
-  background: rgba(124,155,255,0.08);
+  border-color: rgba(124,155,255,0.4);
+  background:
+    linear-gradient(140deg, rgba(124,155,255,0.25), rgba(124,155,255,0.08));
   color: var(--text);
 }
 .priority-pill--medium{
-  border-color: rgba(247,178,106,0.45);
-  background: rgba(247,178,106,0.12);
+  border-color: rgba(247,178,106,0.6);
+  background:
+    linear-gradient(140deg, rgba(247,178,106,0.3), rgba(247,178,106,0.1));
   color: var(--text);
 }
 .priority-pill--high{
-  border-color: rgba(255,106,122,0.6);
-  background: rgba(255,106,122,0.16);
+  border-color: rgba(255,106,122,0.7);
+  background:
+    linear-gradient(140deg, rgba(255,106,122,0.32), rgba(255,106,122,0.12));
   color: var(--text);
 }
 
