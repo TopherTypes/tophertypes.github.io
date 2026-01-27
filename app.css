@@ -886,4 +886,8 @@ label{
 }
 
 /* Utility helpers */
+[hidden]{
+  /* Ensure native hidden attributes consistently remove elements from layout. */
+  display:none !important;
+}
 .hidden{display:none !important;}
