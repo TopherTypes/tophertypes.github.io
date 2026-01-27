@@ -337,9 +337,13 @@ function createTaskDraft(task) {
   return {
     title: task?.title || "",
     notes: task?.notes || "",
+    ownerId: task?.ownerId || getDefaultPersonId() || "",
     dueDate: task?.dueDate || "",
     priority: task?.priority || "medium",
-    status: task?.status || "todo"
+    status: task?.status || "todo",
+    link: task?.link || "",
+    updateTargets: Array.isArray(task?.updateTargets) ? task.updateTargets : [],
+    updateStatus: task?.updateStatus || {},
   };
 }
 
@@ -352,6 +356,69 @@ function validateTaskDraft(draft) {
   const errs = [];
   if (!draft.title.trim()) errs.push("Task title is required.");
   return errs;
+}
+
+/**
+ * Builds a default update-status map for a set of target person ids.
+ * @param {string[]} targetIds Person identifiers to seed in the status map.
+ * @param {object} [existingStatus={}] Existing updateStatus map to preserve.
+ * @returns {object} Normalized updateStatus object keyed by person id.
+ */
+function buildUpdateStatusForTargets(targetIds, existingStatus = {}) {
+  const out = {};
+  (targetIds || []).forEach(pid => {
+    const prior = existingStatus?.[pid];
+    out[pid] = prior ? { updated: !!prior.updated, updatedAt: prior.updatedAt } : { updated: false };
+  });
+  return out;
+}
+
+/**
+ * Normalizes a comma-separated list of people names into ids.
+ * @param {string} rawValue Input string from the UI.
+ * @param {object[]} people People list for name lookup.
+ * @returns {{ids: string[], missing: string[]}} Parsed ids + missing names.
+ */
+function parseTargetNames(rawValue, people) {
+  const names = rawValue
+    .split(",")
+    .map(name => name.trim())
+    .filter(Boolean);
+  const ids = [];
+  const missing = [];
+  names.forEach(name => {
+    const match = findPersonByName(name, people);
+    if (match) {
+      ids.push(match.id);
+    } else {
+      missing.push(name);
+    }
+  });
+  return { ids, missing };
+}
+
+/**
+ * Formats update target ids into a comma-separated list of names.
+ * @param {string[]} targetIds Person ids to display.
+ * @returns {string} Human-readable target list.
+ */
+function formatTargetNames(targetIds) {
+  const names = (targetIds || [])
+    .map(pid => getPerson(pid)?.name)
+    .filter(Boolean);
+  return names.join(", ");
+}
+
+/**
+ * Summarizes update completion for a record.
+ * @param {object} record Task or action item record with update targets.
+ * @returns {string} Update completion label.
+ */
+function buildUpdateProgressLabel(record) {
+  const targets = record?.updateTargets || [];
+  if (!targets.length) return "No update targets";
+  const updatedCount = Object.values(record.updateStatus || {}).filter(st => st.updated).length;
+  return `${updatedCount}/${targets.length} updated`;
 }
 
 function wirePeoplePickers(container, people) {
@@ -915,6 +982,10 @@ function mergeDb(localDb, remoteDb) {
     merged.updatedAt = nowIso();
   }
 
+  if (normalizeTaskAndActionData(merged)) {
+    merged.updatedAt = nowIso();
+  }
+
   return merged;
 }
 
@@ -953,6 +1024,11 @@ async function loadLocal() {
   }
 
   if (defaultPersonResult.changed) {
+    markDirty();
+    await saveLocal();
+  }
+
+  if (normalizeTaskAndActionData(db)) {
     markDirty();
     await saveLocal();
   }
@@ -1138,6 +1214,98 @@ function ensureDefaultPersonInDb(targetDb) {
   }
 
   return { person, changed };
+}
+
+/**
+ * Retrieves the default person identifier from a provided database instance.
+ * @param {object} targetDb Database instance to scan.
+ * @returns {string} Default person id, or empty string if unavailable.
+ */
+function getDefaultPersonIdFromDb(targetDb) {
+  const people = alive(targetDb?.people || []);
+  const defaultPerson = people.find(p => p.isDefault)
+    || people.find(p => (p.name || "").trim().toLowerCase() === DEFAULT_PERSON_NAME.toLowerCase());
+  return defaultPerson?.id || "";
+}
+
+/**
+ * Ensures tasks and meeting action items share the same schema fields.
+ * @param {object} targetDb Database instance to normalize.
+ * @returns {boolean} Whether any records were changed.
+ */
+function normalizeTaskAndActionData(targetDb) {
+  if (!targetDb) return false;
+  let changed = false;
+  const defaultOwnerId = getDefaultPersonIdFromDb(targetDb);
+
+  const normalizeCommonFields = (record, defaults) => {
+    Object.entries(defaults).forEach(([key, value]) => {
+      if (!(key in record)) {
+        record[key] = value;
+        changed = true;
+      }
+    });
+  };
+
+  const normalizeUpdateTracking = (record) => {
+    if (!Array.isArray(record.updateTargets)) {
+      record.updateTargets = [];
+      changed = true;
+    }
+    const cleanedTargets = record.updateTargets.filter(Boolean);
+    if (cleanedTargets.length !== record.updateTargets.length) {
+      record.updateTargets = cleanedTargets;
+      changed = true;
+    }
+    const existingStatus = (record.updateStatus && typeof record.updateStatus === "object") ? record.updateStatus : {};
+    const rebuiltStatus = buildUpdateStatusForTargets(record.updateTargets, existingStatus);
+    if (JSON.stringify(existingStatus) !== JSON.stringify(rebuiltStatus)) {
+      record.updateStatus = rebuiltStatus;
+      changed = true;
+    }
+  };
+
+  alive(targetDb.tasks || []).forEach(task => {
+    normalizeCommonFields(task, {
+      kind: "task",
+      title: task.title || task.text || "",
+      text: task.text || task.title || "",
+      notes: task.notes || "",
+      ownerId: task.ownerId || defaultOwnerId || null,
+      dueDate: task.dueDate || "",
+      priority: task.priority || "medium",
+      status: task.status || "todo",
+      link: task.link || "",
+      meetingId: task.meetingId || null,
+      topicId: task.topicId || null,
+      section: task.section || "task",
+      createdAt: task.createdAt || task.updatedAt || nowIso(),
+      updatedAt: task.updatedAt || nowIso(),
+    });
+    normalizeUpdateTracking(task);
+  });
+
+  alive(targetDb.items || []).forEach(item => {
+    normalizeCommonFields(item, {
+      kind: "item",
+      title: item.title || item.text || "",
+      text: item.text || item.title || "",
+      notes: item.notes || "",
+      ownerId: item.ownerId || null,
+      dueDate: item.dueDate || "",
+      priority: item.priority || "medium",
+      status: item.status || "",
+      link: item.link || "",
+      meetingId: item.meetingId || null,
+      topicId: item.topicId || null,
+      section: item.section || "action",
+      createdAt: item.createdAt || item.updatedAt || nowIso(),
+      updatedAt: item.updatedAt || nowIso(),
+    });
+    normalizeUpdateTracking(item);
+  });
+
+  return changed;
 }
 
 /**
@@ -1366,6 +1534,33 @@ function renderPeopleSelects() {
   if (!updatesSel) return;
   const people = alive(db.people).sort((a,b)=>a.name.localeCompare(b.name));
   renderSelectOptions(updatesSel, people.map(p => ({ value:p.id, label:p.name })), { placeholder: people.length ? "Choose a person…" : "No people yet" });
+}
+
+/**
+ * Populates task creation owner and update target selectors.
+ */
+function renderTaskLightboxOptions() {
+  const ownerSelect = byId("task_owner");
+  const targetsList = byId("task_targets_list");
+  if (!ownerSelect && !targetsList) return;
+
+  const people = alive(db.people).sort((a,b)=>a.name.localeCompare(b.name));
+
+  if (ownerSelect) {
+    const currentValue = ownerSelect.value || getDefaultPersonId();
+    renderSelectOptions(
+      ownerSelect,
+      people.map(p => ({ value: p.id, label: p.name })),
+      { placeholder: people.length ? "Unassigned" : "No people yet" }
+    );
+    if (currentValue) {
+      ownerSelect.value = currentValue;
+    }
+  }
+
+  if (targetsList) {
+    targetsList.innerHTML = people.map(p => `<option value="${escapeHtml(p.name)}"></option>`).join("");
+  }
 }
 
 /**
@@ -1850,6 +2045,11 @@ function renderMeetingSections(meeting, tpl) {
               <textarea data-field="text" placeholder="Type quickly…"></textarea>
             </div>
 
+            <div class="formrow">
+              <label>Notes</label>
+              <textarea data-field="notes" placeholder="Add optional context…"></textarea>
+            </div>
+
             <div class="grid2">
               <div class="formrow">
                 <label>Owner ${fieldTag(false, "ownerId")}</label>
@@ -1873,14 +2073,23 @@ function renderMeetingSections(meeting, tpl) {
 
             <div class="grid2">
               <div class="formrow">
-                <label>Due date</label>
-                <input data-field="dueDate" type="date" />
+                <label>Priority</label>
+                <select data-field="priority">
+                  <option value="low">Low</option>
+                  <option value="medium" selected>Medium</option>
+                  <option value="high">High</option>
+                </select>
               </div>
 
               <div class="formrow">
-                <label>Link</label>
-                <input data-field="link" type="url" placeholder="https://…" />
+                <label>Due date</label>
+                <input data-field="dueDate" type="date" />
               </div>
+            </div>
+
+            <div class="formrow">
+              <label>Link</label>
+              <input data-field="link" type="url" placeholder="https://…" />
             </div>
           </div>
 
@@ -1974,10 +2183,12 @@ function renderMeetingSections(meeting, tpl) {
       const box = btn.closest(".sectionbox");
       const sectionKey = box.querySelector("select[data-field=section]")?.value || "";
       const text = box.querySelector("textarea[data-field=text]").value.trim();
+      const notes = box.querySelector("textarea[data-field=notes]").value.trim();
       const ownerName = box.querySelector("input[data-field=ownerName]")?.value.trim() || "";
       const ownerMatch = ownerName ? findPersonByName(ownerName, people) : null;
       const ownerId = ownerMatch ? ownerMatch.id : null;
       const status = box.querySelector("select[data-field=status]").value || null;
+      const priority = box.querySelector("select[data-field=priority]").value || "medium";
       const dueDate = box.querySelector("input[data-field=dueDate]").value || null;
       const link = box.querySelector("input[data-field=link]").value.trim() || null;
 
@@ -2010,9 +2221,12 @@ function renderMeetingSections(meeting, tpl) {
         topicId: meeting.topicId,
         section: sectionKey,
         text,
+        title: text,
+        notes,
         ownerId,
         status,
         dueDate,
+        priority,
         link,
         updateTargets: expandedTargets,
         updateStatus: expandedTargets.reduce((acc, pid) => {
@@ -2029,8 +2243,10 @@ function renderMeetingSections(meeting, tpl) {
 
       // clear inputs
       box.querySelector("textarea[data-field=text]").value = "";
+      box.querySelector("textarea[data-field=notes]").value = "";
       box.querySelector("input[data-field=ownerName]").value = "";
       box.querySelector("select[data-field=status]").value = "";
+      box.querySelector("select[data-field=priority]").value = "medium";
       box.querySelector("input[data-field=dueDate]").value = "";
       box.querySelector("input[data-field=link]").value = "";
       box.querySelectorAll("input[type=checkbox]").forEach(c => c.checked = false);
@@ -2061,10 +2277,12 @@ function renderItemCard(it) {
 
   const draft = editState?.draft || {
     text: it.text || "",
+    notes: it.notes || "",
     status: it.status || "",
     dueDate: it.dueDate || "",
     link: it.link || "",
     ownerName: owner?.name || "",
+    priority: it.priority || "medium",
   };
   const editError = editState?.error || "";
 
@@ -2082,6 +2300,7 @@ function renderItemCard(it) {
     : "";
 
   const linkBadge = it.link ? `<span class="badge badge--accent">Link</span>` : "";
+  const priorityBadge = it.priority ? `<span class="badge">Priority: ${escapeHtml(TASK_PRIORITY_LABELS[it.priority] || it.priority)}</span>` : "";
 
   if (isEditing) {
     return `
@@ -2101,6 +2320,11 @@ function renderItemCard(it) {
           <div class="formrow">
             <label>Text ${fieldTag(true)}</label>
             <textarea data-edit-field="text" placeholder="Update text…">${escapeHtml(draft.text)}</textarea>
+          </div>
+
+          <div class="formrow">
+            <label>Notes</label>
+            <textarea data-edit-field="notes" placeholder="Add optional notes…">${escapeHtml(draft.notes)}</textarea>
           </div>
 
           <div class="grid2">
@@ -2126,14 +2350,23 @@ function renderItemCard(it) {
 
           <div class="grid2">
             <div class="formrow">
-              <label>Due date ${fieldTag(false)}</label>
-              <input data-edit-field="dueDate" type="date" value="${escapeHtml(draft.dueDate)}" />
+              <label>Priority</label>
+              <select data-edit-field="priority">
+                <option value="low"${draft.priority === "low" ? " selected" : ""}>Low</option>
+                <option value="medium"${draft.priority === "medium" ? " selected" : ""}>Medium</option>
+                <option value="high"${draft.priority === "high" ? " selected" : ""}>High</option>
+              </select>
             </div>
 
             <div class="formrow">
-              <label>Link ${fieldTag(false)}</label>
-              <input data-edit-field="link" type="url" placeholder="https://…" value="${escapeHtml(draft.link)}" />
+              <label>Due date ${fieldTag(false)}</label>
+              <input data-edit-field="dueDate" type="date" value="${escapeHtml(draft.dueDate)}" />
             </div>
+          </div>
+
+          <div class="formrow">
+            <label>Link ${fieldTag(false)}</label>
+            <input data-edit-field="link" type="url" placeholder="https://…" value="${escapeHtml(draft.link)}" />
           </div>
           ${editError ? `<div class="item__error">${escapeHtml(editError)}</div>` : ""}
         </div>
@@ -2153,6 +2386,7 @@ function renderItemCard(it) {
           <span class="badge badge--accent">${escapeHtml(sectionLabel)}</span>
           ${status ? `<span class="badge ${statusBadge}">${escapeHtml(status.replace("_"," "))}</span>` : ""}
           ${it.dueDate ? `<span class="badge">${escapeHtml(it.dueDate)}</span>` : ""}
+          ${priorityBadge}
           ${updBadge}
           ${linkBadge}
         </div>
@@ -2160,6 +2394,7 @@ function renderItemCard(it) {
       </div>
 
       <div class="item__text">${escapeHtml(it.text)}</div>
+      ${it.notes ? `<div class="item__notes">${escapeHtml(it.notes)}</div>` : ""}
 
       <div class="item__meta">
         ${topic ? `<span>Topic: <strong>${escapeHtml(topic.name)}</strong></span>` : ""}
@@ -2186,10 +2421,12 @@ function wireItemButtons(rootEl) {
       itemEditState.set(id, {
         draft: {
           text: it.text || "",
+          notes: it.notes || "",
           status: it.status || "",
           dueDate: it.dueDate || "",
           link: it.link || "",
           ownerName: getPerson(it.ownerId)?.name || "",
+          priority: it.priority || "medium",
         },
         error: "",
       });
@@ -2206,10 +2443,12 @@ function wireItemButtons(rootEl) {
       if (!card) return;
 
       const text = card.querySelector("[data-edit-field=text]")?.value.trim() || "";
+      const notes = card.querySelector("[data-edit-field=notes]")?.value.trim() || "";
       const ownerName = card.querySelector("[data-edit-field=ownerName]")?.value.trim() || "";
       const ownerMatch = ownerName ? findPersonByName(ownerName) : null;
       const ownerId = ownerMatch ? ownerMatch.id : null;
       const status = card.querySelector("[data-edit-field=status]")?.value || null;
+      const priority = card.querySelector("[data-edit-field=priority]")?.value || "medium";
       const dueDate = card.querySelector("[data-edit-field=dueDate]")?.value || null;
       const link = card.querySelector("[data-edit-field=link]")?.value.trim() || null;
 
@@ -2231,10 +2470,12 @@ function wireItemButtons(rootEl) {
         itemEditState.set(id, {
           draft: {
             text,
+            notes,
             status: status || "",
             dueDate: dueDate || "",
             link: link || "",
             ownerName: ownerName || "",
+            priority,
           },
           error: errs.join(" "),
         });
@@ -2243,8 +2484,11 @@ function wireItemButtons(rootEl) {
       }
 
       it.text = text;
+      it.title = text;
+      it.notes = notes;
       it.ownerId = ownerId;
       it.status = status;
+      it.priority = priority;
       it.dueDate = dueDate;
       it.link = link;
       it.updatedAt = nowIso();
@@ -2650,10 +2894,15 @@ function buildTaskViews() {
     id: task.id,
     sourceType: "task",
     title: task.title,
+    text: task.text || task.title || "",
     notes: task.notes || "",
+    ownerId: task.ownerId || "",
     dueDate: task.dueDate || "",
     priority: task.priority || "medium",
     status: task.status || "todo",
+    link: task.link || "",
+    updateTargets: Array.isArray(task.updateTargets) ? task.updateTargets : [],
+    updateStatus: task.updateStatus || {},
     updatedAt: task.updatedAt,
     createdAt: task.createdAt,
   }));
@@ -2666,16 +2915,21 @@ function buildTaskViews() {
   const linkedActions = actionItems.map(item => ({
     id: item.id,
     sourceType: "item",
-    title: item.text || "Untitled action",
-    notes: buildActionTaskNotes(item),
+    title: item.title || item.text || "Untitled action",
+    text: item.text || item.title || "",
+    notes: item.notes || "",
+    ownerId: item.ownerId || "",
     dueDate: item.dueDate || "",
-    priority: "medium",
+    priority: item.priority || "medium",
     status: mapActionStatusToTaskStatus(item.status),
+    link: item.link || "",
+    updateTargets: Array.isArray(item.updateTargets) ? item.updateTargets : [],
+    updateStatus: item.updateStatus || {},
+    context: buildActionTaskNotes(item),
     updatedAt: item.updatedAt,
     createdAt: item.createdAt,
     meetingId: item.meetingId,
     topicId: item.topicId,
-    link: item.link || "",
   }));
 
   return [...tasks, ...linkedActions];
@@ -2728,86 +2982,107 @@ function renderTasks() {
     return;
   }
 
-  list.innerHTML = sorted.map(task => renderTaskCard(task)).join("");
+  list.innerHTML = `
+    <div class="task-table-wrapper">
+      <div class="task-table">
+        <div class="task-row task-row--header">
+          <div>Task</div>
+          <div>Notes</div>
+          <div>Owner</div>
+          <div>Status</div>
+          <div>Priority</div>
+          <div>Due date</div>
+          <div>Link</div>
+          <div>Update targets</div>
+          <div>Actions</div>
+        </div>
+        <div class="task-table__body">
+          ${sorted.map(task => renderTaskCard(task)).join("")}
+        </div>
+      </div>
+    </div>
+  `;
   wireTaskList(list);
 }
 
 /**
- * Builds a task card for the Tasks module list.
+ * Builds a task row for the Tasks module list.
  * @param {object} task Task record.
- * @returns {string} Task list markup.
+ * @returns {string} Task row markup.
  */
 function renderTaskCard(task) {
   const statusKey = task.status || "todo";
   const priorityKey = task.priority || "medium";
-  const statusLabel = TASK_STATUS_LABELS[statusKey] || statusKey;
-  const priorityLabel = TASK_PRIORITY_LABELS[priorityKey] || priorityKey;
-  const dueLabel = formatTaskDueDate(task.dueDate);
   const isLinkedAction = task.sourceType === "item";
-  const isEditableTask = task.sourceType === "task";
-  const readonlyAttr = isEditableTask ? "" : "readonly";
-  const disabledAttr = isEditableTask ? "" : "disabled";
-  const detailsLabel = isLinkedAction ? "Details" : "Notes";
-  const detailsText = isLinkedAction
-    ? (task.notes || "No details captured yet.")
-    : (task.notes || "");
-  const sourceBadge = isLinkedAction ? `<span class="badge badge--accent">Action item</span>` : "";
-  const sourceMeta = isLinkedAction ? " • Linked from meetings" : "";
-
-  // Status and priority color classes for visual scanning.
-  const statusBadgeClass = `status-pill status-pill--${statusKey}`;
-  const priorityBadgeClass = `priority-pill priority-pill--${priorityKey}`;
+  const people = alive(db.people).sort((a,b)=>a.name.localeCompare(b.name));
+  const meeting = task.meetingId ? getMeeting(task.meetingId) : null;
+  const topic = task.topicId ? getTopic(task.topicId) : null;
+  const sourceMeta = isLinkedAction ? "Linked action" : "Personal task";
+  const contextMeta = isLinkedAction
+    ? ""
+    : [
+      meeting ? `Meeting: ${meeting.title || "Untitled"}` : null,
+      topic ? `Topic: ${topic.name}` : null,
+    ].filter(Boolean).join(" • ");
+  const ownerName = task.ownerId ? getPerson(task.ownerId)?.name || "Unknown owner" : "";
+  const ownerOptions = [
+    `<option value="">Unassigned</option>`,
+    ownerName && !people.some(p => p.id === task.ownerId)
+      ? `<option value="${escapeHtml(task.ownerId)}" selected>Unknown owner</option>`
+      : "",
+    ...people.map(p => `<option value="${escapeHtml(p.id)}"${p.id === task.ownerId ? " selected" : ""}>${escapeHtml(p.name)}</option>`)
+  ].join("");
+  const updateTargetsLabel = formatTargetNames(task.updateTargets);
+  const updateProgress = buildUpdateProgressLabel(task);
 
   return `
-    <div class="task-card" data-task-id="${task.id}" data-task-source="${escapeHtml(task.sourceType || "task")}">
-      <div class="task-card__header">
-        <div>
-          <div class="task-card__title" data-task-display="title">${escapeHtml(task.title)}</div>
-          <div class="task-card__meta">Updated ${escapeHtml(fmtDateTime(task.updatedAt))}${sourceMeta}</div>
-        </div>
-        <div class="task-card__badges">
-          ${sourceBadge}
-          <span class="badge ${statusBadgeClass}" data-task-badge="status">${escapeHtml(statusLabel)}</span>
-          <span class="badge ${priorityBadgeClass}" data-task-badge="priority">${escapeHtml(priorityLabel)}</span>
-          <span class="badge" data-task-badge="due">Due: ${escapeHtml(dueLabel)}</span>
+    <div class="task-row" data-task-id="${task.id}" data-task-source="${escapeHtml(task.sourceType || "task")}">
+      <div class="task-cell">
+        <input class="task-input" type="text" value="${escapeHtml(task.title || "")}" data-task-field="title" />
+        <div class="task-row__meta">
+          <span class="task-row__meta-label">${escapeHtml(sourceMeta)}</span>
+          ${contextMeta ? `<span class="task-row__meta-context">${escapeHtml(contextMeta)}</span>` : ""}
+          ${task.context ? `<span class="task-row__meta-context">${escapeHtml(task.context)}</span>` : ""}
         </div>
       </div>
-      <div class="task-card__body">
-        <div class="task-field">
-          <label>Title</label>
-          <input type="text" value="${escapeHtml(task.title)}" data-task-field="title" ${readonlyAttr} />
-        </div>
-        <div class="task-field">
-          <label>${escapeHtml(detailsLabel)}</label>
-          <textarea data-task-field="notes" ${readonlyAttr} ${isLinkedAction ? "" : `placeholder="No notes yet."`}>${escapeHtml(detailsText)}</textarea>
-        </div>
-        <div class="task-field-grid">
-          <div class="task-field">
-            <label>Due date</label>
-            <input type="date" value="${escapeHtml(task.dueDate || "")}" data-task-field="dueDate" ${disabledAttr} />
-          </div>
-          <div class="task-field">
-            <label>Priority</label>
-            <select class="task-priority task-priority--${priorityKey}" data-task-field="priority" ${disabledAttr}>
-              <option value="low" ${priorityKey === "low" ? "selected" : ""}>Low</option>
-              <option value="medium" ${priorityKey === "medium" ? "selected" : ""}>Medium</option>
-              <option value="high" ${priorityKey === "high" ? "selected" : ""}>High</option>
-            </select>
-          </div>
-          <div class="task-field">
-            <label>Status</label>
-            <select class="task-status task-status--${statusKey}" data-task-field="status">
-              <option value="todo" ${statusKey === "todo" ? "selected" : ""}>To do</option>
-              <option value="in_progress" ${statusKey === "in_progress" ? "selected" : ""}>In progress</option>
-              <option value="blocked" ${statusKey === "blocked" ? "selected" : ""}>Blocked</option>
-              <option value="done" ${statusKey === "done" ? "selected" : ""}>Done</option>
-            </select>
-          </div>
+      <div class="task-cell">
+        <textarea class="task-input" data-task-field="notes" placeholder="Add supporting notes...">${escapeHtml(task.notes || "")}</textarea>
+      </div>
+      <div class="task-cell">
+        <select class="task-input" data-task-field="ownerId">
+          ${ownerOptions}
+        </select>
+      </div>
+      <div class="task-cell">
+        <select class="task-status task-status--${statusKey}" data-task-field="status">
+          <option value="todo"${statusKey === "todo" ? " selected" : ""}>To do</option>
+          <option value="in_progress"${statusKey === "in_progress" ? " selected" : ""}>In progress</option>
+          <option value="blocked"${statusKey === "blocked" ? " selected" : ""}>Blocked</option>
+          <option value="done"${statusKey === "done" ? " selected" : ""}>Done</option>
+        </select>
+      </div>
+      <div class="task-cell">
+        <select class="task-priority task-priority--${priorityKey}" data-task-field="priority">
+          <option value="low"${priorityKey === "low" ? " selected" : ""}>Low</option>
+          <option value="medium"${priorityKey === "medium" ? " selected" : ""}>Medium</option>
+          <option value="high"${priorityKey === "high" ? " selected" : ""}>High</option>
+        </select>
+      </div>
+      <div class="task-cell">
+        <input class="task-input" type="date" value="${escapeHtml(task.dueDate || "")}" data-task-field="dueDate" />
+      </div>
+      <div class="task-cell">
+        <input class="task-input" type="url" value="${escapeHtml(task.link || "")}" placeholder="https://…" data-task-field="link" />
+      </div>
+      <div class="task-cell">
+        <input class="task-input" type="text" value="${escapeHtml(updateTargetsLabel)}" placeholder="Add names separated by commas" data-task-field="updateTargets" data-task-targets="${escapeHtml(updateTargetsLabel)}" />
+        <div class="task-row__meta">
+          <span data-task-display="update-progress">${escapeHtml(updateProgress)}</span>
         </div>
       </div>
-      <div class="task-card__actions">
+      <div class="task-cell task-cell--actions">
         ${isLinkedAction && task.meetingId ? `<button class="smallbtn" data-task-action="open-meeting" data-task-meeting="${escapeHtml(task.meetingId)}">Open meeting</button>` : ""}
-        ${isLinkedAction && task.link ? `<button class="smallbtn" data-task-action="open-link" data-task-link="${escapeHtml(task.link)}">Open link</button>` : ""}
+        ${task.link ? `<button class="smallbtn" data-task-action="open-link" data-task-link="${escapeHtml(task.link)}">Open link</button>` : ""}
         <button class="smallbtn smallbtn--danger" data-task-action="delete">Delete</button>
       </div>
     </div>
@@ -2815,7 +3090,7 @@ function renderTaskCard(task) {
 }
 
 /**
- * Wires click handlers for task cards.
+ * Wires click handlers for task rows.
  * @param {HTMLElement} container Task list container.
  */
 function wireTaskList(container) {
@@ -2829,20 +3104,40 @@ function wireTaskList(container) {
     if (sourceType === "item") {
       const item = getItem(taskId);
       if (!item) return;
-      if (typeof updates.title === "string") item.text = updates.title;
+      if (typeof updates.title === "string") {
+        item.title = updates.title;
+        item.text = updates.title;
+      }
+      if (typeof updates.notes === "string") item.notes = updates.notes;
+      if (typeof updates.ownerId === "string") item.ownerId = updates.ownerId || null;
       if (typeof updates.dueDate === "string") item.dueDate = updates.dueDate;
+      if (typeof updates.priority === "string") item.priority = updates.priority;
       if (typeof updates.status === "string") item.status = mapTaskStatusToActionStatus(updates.status);
+      if (typeof updates.link === "string") item.link = updates.link;
+      if (Array.isArray(updates.updateTargets)) {
+        item.updateTargets = updates.updateTargets;
+        item.updateStatus = buildUpdateStatusForTargets(updates.updateTargets, item.updateStatus);
+      }
       item.updatedAt = nowIso();
       return;
     }
 
     const task = getTask(taskId);
     if (!task) return;
-    if (typeof updates.title === "string") task.title = updates.title;
+    if (typeof updates.title === "string") {
+      task.title = updates.title;
+      task.text = updates.title;
+    }
     if (typeof updates.notes === "string") task.notes = updates.notes;
+    if (typeof updates.ownerId === "string") task.ownerId = updates.ownerId || null;
     if (typeof updates.dueDate === "string") task.dueDate = updates.dueDate;
     if (typeof updates.priority === "string") task.priority = updates.priority;
     if (typeof updates.status === "string") task.status = updates.status;
+    if (typeof updates.link === "string") task.link = updates.link;
+    if (Array.isArray(updates.updateTargets)) {
+      task.updateTargets = updates.updateTargets;
+      task.updateStatus = buildUpdateStatusForTargets(updates.updateTargets, task.updateStatus);
+    }
     task.updatedAt = nowIso();
   };
 
@@ -2860,61 +3155,62 @@ function wireTaskList(container) {
    * @param {object} updates Updated field values.
    */
   const syncTaskCardDisplay = (card, updates) => {
-    if (updates.title !== undefined) {
-      const titleEl = card.querySelector("[data-task-display='title']");
-      if (titleEl) titleEl.textContent = updates.title || "Untitled";
-    }
-
     if (updates.status !== undefined) {
       const statusKey = updates.status || "todo";
-      const statusLabel = TASK_STATUS_LABELS[statusKey] || statusKey;
-      const statusBadge = card.querySelector("[data-task-badge='status']");
-      if (statusBadge) {
-        statusBadge.className = `badge status-pill status-pill--${statusKey}`;
-        statusBadge.textContent = statusLabel;
-      }
+      const statusSelect = card.querySelector("[data-task-field='status']");
+      if (statusSelect) statusSelect.className = `task-status task-status--${statusKey}`;
     }
 
     if (updates.priority !== undefined) {
       const priorityKey = updates.priority || "medium";
-      const priorityLabel = TASK_PRIORITY_LABELS[priorityKey] || priorityKey;
-      const priorityBadge = card.querySelector("[data-task-badge='priority']");
-      if (priorityBadge) {
-        priorityBadge.className = `badge priority-pill priority-pill--${priorityKey}`;
-        priorityBadge.textContent = priorityLabel;
-      }
+      const prioritySelect = card.querySelector("[data-task-field='priority']");
+      if (prioritySelect) prioritySelect.className = `task-priority task-priority--${priorityKey}`;
     }
 
-    if (updates.dueDate !== undefined) {
-      const dueBadge = card.querySelector("[data-task-badge='due']");
-      if (dueBadge) dueBadge.textContent = `Due: ${formatTaskDueDate(updates.dueDate)}`;
+    if (updates.updateTargets !== undefined) {
+      const progress = card.querySelector("[data-task-display='update-progress']");
+      if (progress) {
+        const updateStatus = updates.updateStatus || buildUpdateStatusForTargets(updates.updateTargets);
+        progress.textContent = buildUpdateProgressLabel({ updateTargets: updates.updateTargets, updateStatus });
+      }
     }
   };
 
-  // Inline edits for all editable task fields (title, notes, due date, priority, status).
+  // Inline edits for all editable task fields (title, notes, owner, status, priority, due date, link, updates).
   container.querySelectorAll("[data-task-field]").forEach(field => {
     const fieldName = field.getAttribute("data-task-field");
     if (!fieldName) return;
 
-    const eventName = field.tagName === "SELECT" ? "change" : "input";
+    const eventName = fieldName === "updateTargets"
+      ? "change"
+      : (field.tagName === "SELECT" ? "change" : "input");
     field.addEventListener(eventName, () => {
       const card = field.closest("[data-task-id]");
       if (!card) return;
       const taskId = card.getAttribute("data-task-id");
       const sourceType = card.getAttribute("data-task-source") || "task";
 
-      const value = field.value ?? "";
+      let value = field.value ?? "";
+
+      if (fieldName === "updateTargets") {
+        const people = alive(db.people);
+        const { ids, missing } = parseTargetNames(value, people);
+        if (missing.length) {
+          alert(`Unknown people: ${missing.join(", ")}.`);
+          field.value = field.getAttribute("data-task-targets") || "";
+          return;
+        }
+        const formatted = formatTargetNames(ids);
+        field.value = formatted;
+        field.setAttribute("data-task-targets", formatted);
+        applyTaskUpdates(taskId, sourceType, { updateTargets: ids });
+        syncTaskCardDisplay(card, { updateTargets: ids, updateStatus: buildUpdateStatusForTargets(ids) });
+        persistTaskChanges();
+        return;
+      }
+
       applyTaskUpdates(taskId, sourceType, { [fieldName]: value });
       syncTaskCardDisplay(card, { [fieldName]: value });
-
-      if (fieldName === "status") {
-        field.className = `task-status task-status--${value || "todo"}`;
-      }
-
-      if (fieldName === "priority") {
-        field.className = `task-priority task-priority--${value || "medium"}`;
-      }
-
       persistTaskChanges();
     });
   });
@@ -2974,6 +3270,7 @@ function renderAll() {
   renderTemplates();
   renderTopics();
   renderPeopleSelects();
+  renderTaskLightboxOptions();
   renderMeetingCounterpartSelects();
   renderPeopleManager();
   renderGroups();
@@ -3029,6 +3326,7 @@ function syncMeetingOneToOneFields() {
  * Opens the task creation lightbox.
  */
 function openTaskLightbox() {
+  renderTaskLightboxOptions();
   openLightbox("task_lightbox", "task_title");
 }
 
@@ -3193,9 +3491,12 @@ function readTaskFormDraft() {
   return {
     title: byId("task_title")?.value || "",
     notes: byId("task_notes")?.value || "",
+    ownerId: byId("task_owner")?.value || "",
     dueDate: byId("task_due")?.value || "",
     priority: byId("task_priority")?.value || "medium",
-    status: byId("task_status")?.value || "todo"
+    status: byId("task_status")?.value || "todo",
+    link: byId("task_link")?.value?.trim() || "",
+    updateTargetsRaw: byId("task_update_targets")?.value || "",
   };
 }
 
@@ -3206,15 +3507,21 @@ function clearTaskForm() {
   const defaults = createTaskDraft(null);
   const titleInput = byId("task_title");
   const notesInput = byId("task_notes");
+  const ownerSelect = byId("task_owner");
   const dueInput = byId("task_due");
   const prioritySelect = byId("task_priority");
   const statusSelect = byId("task_status");
+  const linkInput = byId("task_link");
+  const updateTargetsInput = byId("task_update_targets");
 
   if (titleInput) titleInput.value = defaults.title;
   if (notesInput) notesInput.value = defaults.notes;
+  if (ownerSelect) ownerSelect.value = defaults.ownerId || "";
   if (dueInput) dueInput.value = defaults.dueDate;
   if (prioritySelect) prioritySelect.value = defaults.priority;
   if (statusSelect) statusSelect.value = defaults.status;
+  if (linkInput) linkInput.value = defaults.link || "";
+  if (updateTargetsInput) updateTargetsInput.value = formatTargetNames(defaults.updateTargets);
 }
 
 /**
@@ -3302,14 +3609,29 @@ async function addTask() {
     return;
   }
 
+  const { ids: updateTargets, missing } = parseTargetNames(draft.updateTargetsRaw, alive(db.people));
+  if (missing.length) {
+    alert(`Unknown people: ${missing.join(", ")}.`);
+    return;
+  }
+
   const now = nowIso();
   const task = {
     id: uid("task"),
+    kind: "task",
     title: draft.title.trim(),
+    text: draft.title.trim(),
     notes: draft.notes.trim(),
+    ownerId: draft.ownerId || getDefaultPersonId() || null,
     dueDate: draft.dueDate,
     priority: draft.priority,
     status: draft.status,
+    link: draft.link.trim(),
+    updateTargets,
+    updateStatus: buildUpdateStatusForTargets(updateTargets),
+    meetingId: null,
+    topicId: null,
+    section: "task",
     createdAt: now,
     updatedAt: now
   };
