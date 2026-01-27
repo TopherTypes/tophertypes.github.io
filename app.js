@@ -21,6 +21,8 @@ const SCOPES = "https://www.googleapis.com/auth/drive.appdata";
 const DRIVE_FILENAME = "meeting-notes.v1.json";
 const STANDARD_TEMPLATE_ID = "tpl_standard";
 const ONE_TO_ONE_TEMPLATE_ID = "tpl_1on1";
+// Canonical name for the built-in default person entity.
+const DEFAULT_PERSON_NAME = "Me";
 
 // IndexedDB schema identifiers.
 const IDB_NAME = "meeting-notes-db";
@@ -81,6 +83,43 @@ const TASK_PRIORITY_LABELS = {
 // Sort weight maps for consistent task ordering.
 const TASK_PRIORITY_ORDER = { high: 0, medium: 1, low: 2 };
 const TASK_STATUS_ORDER = { todo: 0, in_progress: 1, blocked: 2, done: 3 };
+
+// Status mapping helpers to keep action items and tasks aligned across modules.
+const ACTION_STATUS_TO_TASK_STATUS = {
+  open: "todo",
+  in_progress: "in_progress",
+  blocked: "blocked",
+  done: "done",
+};
+
+const TASK_STATUS_TO_ACTION_STATUS = {
+  todo: "open",
+  in_progress: "in_progress",
+  blocked: "blocked",
+  done: "done",
+};
+
+/* ================================
+   TASK LINKING HELPERS
+=================================== */
+
+/**
+ * Normalizes an action item status value to its task-module equivalent.
+ * @param {string} status Action item status.
+ * @returns {string} Task status key for rendering/filtering.
+ */
+function mapActionStatusToTaskStatus(status) {
+  return ACTION_STATUS_TO_TASK_STATUS[status] || "todo";
+}
+
+/**
+ * Normalizes a task status value back to the action item status vocabulary.
+ * @param {string} status Task status.
+ * @returns {string} Action status key for persistence.
+ */
+function mapTaskStatusToActionStatus(status) {
+  return TASK_STATUS_TO_ACTION_STATUS[status] || "open";
+}
 
 /* ================================
    UTIL
@@ -163,6 +202,22 @@ function escapeHtml(s){
   return (s ?? "").replace(/[&<>"']/g, (c) => ({
     "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"
   }[c]));
+}
+
+/**
+ * Creates the canonical default person record used across modules.
+ * @returns {object} Default person entity with locked fields.
+ */
+function createDefaultPersonRecord() {
+  return {
+    id: uid("person"),
+    name: DEFAULT_PERSON_NAME,
+    email: "",
+    organisation: "",
+    jobTitle: "",
+    isDefault: true,
+    updatedAt: nowIso(),
+  };
 }
 
 /**
@@ -423,16 +478,17 @@ function formatTime(iso) {
 =================================== */
 
 function makeDefaultDb() {
-  // starter people/groups/topics empty
+  // Seed with the required default person record so every module has a shared entity.
+  const defaultPerson = createDefaultPersonRecord();
   return {
     schemaVersion: 1,
     updatedAt: nowIso(),
     settings: {
-      defaultOwnerName: "",
+      defaultOwnerName: DEFAULT_PERSON_NAME,
       updatedAt: nowIso(),
     },
     templates: createBuiltinTemplates(),
-    people: [],
+    people: [defaultPerson],
     groups: [],
     topics: [],
     meetings: [],
@@ -853,6 +909,12 @@ function mergeDb(localDb, remoteDb) {
     merged.updatedAt = nowIso();
   }
 
+  // Guarantee the default person exists after merges for consistent cross-module linking.
+  const defaultResult = ensureDefaultPersonInDb(merged);
+  if (defaultResult.changed) {
+    merged.updatedAt = nowIso();
+  }
+
   return merged;
 }
 
@@ -878,7 +940,19 @@ async function loadLocal() {
     db.tasks = [];
   }
 
+  let defaultPersonResult = ensureDefaultPersonInDb(db);
+  if (!db.settings.defaultOwnerName) {
+    db.settings.defaultOwnerName = DEFAULT_PERSON_NAME;
+    db.settings.updatedAt = nowIso();
+    defaultPersonResult = { ...defaultPersonResult, changed: true };
+  }
+
   if (normalizeBuiltinTemplates(db)) {
+    markDirty();
+    await saveLocal();
+  }
+
+  if (defaultPersonResult.changed) {
     markDirty();
     await saveLocal();
   }
@@ -1003,6 +1077,86 @@ function alive(arr) {
   return (arr || []).filter(x => !x.deleted);
 }
 
+/**
+ * Determines whether a person is the built-in default entity.
+ * @param {object|null} person Person record to check.
+ * @returns {boolean} Whether the person is the default "Me" entity.
+ */
+function isDefaultPerson(person) {
+  if (!person) return false;
+  if (person.isDefault) return true;
+  return (person.name || "").trim().toLowerCase() === DEFAULT_PERSON_NAME.toLowerCase();
+}
+
+/**
+ * Ensures the default person exists in the provided database and is not deleted.
+ * @param {object} targetDb Database instance to normalize.
+ * @returns {{ person: object, changed: boolean }} Normalized person and change flag.
+ */
+function ensureDefaultPersonInDb(targetDb) {
+  if (!targetDb) return { person: null, changed: false };
+  if (!targetDb.people) targetDb.people = [];
+
+  const people = targetDb.people;
+  const flagged = people.find(p => p.isDefault);
+  const named = people.find(p => (p.name || "").trim().toLowerCase() === DEFAULT_PERSON_NAME.toLowerCase());
+  const person = flagged || named;
+
+  if (!person) {
+    const created = createDefaultPersonRecord();
+    people.push(created);
+    return { person: created, changed: true };
+  }
+
+  let changed = false;
+  if (person.name !== DEFAULT_PERSON_NAME) {
+    person.name = DEFAULT_PERSON_NAME;
+    changed = true;
+  }
+  if (person.email) {
+    person.email = "";
+    changed = true;
+  }
+  if (person.organisation) {
+    person.organisation = "";
+    changed = true;
+  }
+  if (person.jobTitle) {
+    person.jobTitle = "";
+    changed = true;
+  }
+  if (person.deleted) {
+    person.deleted = false;
+    changed = true;
+  }
+  if (!person.isDefault) {
+    person.isDefault = true;
+    changed = true;
+  }
+  if (changed) {
+    person.updatedAt = nowIso();
+  }
+
+  return { person, changed };
+}
+
+/**
+ * Retrieves the default person record from the active database.
+ * @returns {object|null} Default person record, if available.
+ */
+function getDefaultPerson() {
+  const people = alive(db.people);
+  return people.find(p => p.isDefault) || people.find(p => (p.name || "").trim().toLowerCase() === DEFAULT_PERSON_NAME.toLowerCase()) || null;
+}
+
+/**
+ * Retrieves the default person identifier for linking across modules.
+ * @returns {string} Default person id, or empty string if unavailable.
+ */
+function getDefaultPersonId() {
+  return getDefaultPerson()?.id || "";
+}
+
 function getPerson(id) {
   return alive(db.people).find(p => p.id === id) || null;
 }
@@ -1036,6 +1190,9 @@ function ensureTopic(name) {
 function ensurePerson(name) {
   const existing = alive(db.people).find(p => p.name.toLowerCase() === name.toLowerCase());
   if (existing) return existing.id;
+  if (name.trim().toLowerCase() === DEFAULT_PERSON_NAME.toLowerCase()) {
+    return getDefaultPersonId();
+  }
   const p = { id: uid("person"), name, email: "", organisation: "", jobTitle: "", updatedAt: nowIso() };
   db.people.push(p);
   return p.id;
@@ -1254,11 +1411,13 @@ function renderPeopleManager() {
   }
 
   list.innerHTML = people.map(p => {
+    const isDefault = isDefaultPerson(p);
     const meta = [
       p.email ? escapeHtml(p.email) : null,
       p.organisation ? escapeHtml(p.organisation) : null,
       p.jobTitle ? escapeHtml(p.jobTitle) : null,
     ].filter(Boolean).join(" • ");
+    const badgeLabel = isDefault ? "Default" : p.id;
     return `
       <div class="item ${p.id === personViewId ? "item--selected" : ""}">
         <div class="item__top">
@@ -1266,11 +1425,11 @@ function renderPeopleManager() {
             <strong>${escapeHtml(p.name)}</strong>
             <div class="muted">${meta || "No details added yet."}</div>
           </div>
-          <div class="badges"><span class="badge">${escapeHtml(p.id)}</span></div>
+          <div class="badges"><span class="badge">${escapeHtml(badgeLabel)}</span></div>
         </div>
         <div class="item__actions">
           <button class="smallbtn" data-person-select="${escapeHtml(p.id)}">View</button>
-          <button class="smallbtn smallbtn--danger" data-del-person="${escapeHtml(p.id)}">Delete</button>
+          <button class="smallbtn smallbtn--danger" data-del-person="${escapeHtml(p.id)}" ${isDefault ? "disabled" : ""} title="${isDefault ? "The default person cannot be deleted." : "Delete this person"}">Delete</button>
         </div>
       </div>
     `;
@@ -1291,6 +1450,10 @@ function renderPeopleManager() {
       const id = btn.getAttribute("data-del-person");
       const p = getPerson(id);
       if (!p) return;
+      if (isDefaultPerson(p)) {
+        alert("The default person cannot be deleted.");
+        return;
+      }
       if (!confirm(`Delete ${p.name}? This won’t erase history but removes them from lists.`)) return;
       p.deleted = true;
       p.updatedAt = nowIso();
@@ -1305,6 +1468,11 @@ function renderPeopleManager() {
   });
 
   if (!personEditorState.draft) {
+    const saveBtn = byId("person_save_btn");
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.title = "Select a person to edit.";
+    }
     editor.innerHTML = `<div class="muted">Select a person to view or edit their details.</div>`;
     ownedList.innerHTML = `<div class="muted">Select a person to see owned updates.</div>`;
     targetList.innerHTML = `<div class="muted">Select a person to see update targets.</div>`;
@@ -1312,23 +1480,33 @@ function renderPeopleManager() {
   }
 
   const draft = personEditorState.draft;
+  const activePerson = personViewId ? getPerson(personViewId) : null;
+  const isDefault = activePerson ? isDefaultPerson(activePerson) : false;
+  const lockHint = isDefault ? `<div class="muted">Default person details are locked.</div>` : "";
+  const lockAttr = isDefault ? "disabled" : "";
+  const saveBtn = byId("person_save_btn");
+  if (saveBtn) {
+    saveBtn.disabled = isDefault;
+    saveBtn.title = isDefault ? "Default person details are locked." : "Save changes";
+  }
   editor.innerHTML = `
     <div class="formrow">
       <label>Name ${fieldTag(true)}</label>
-      <input id="person_name" type="text" value="${escapeHtml(draft.name)}" />
+      <input id="person_name" type="text" value="${escapeHtml(draft.name)}" ${lockAttr} />
     </div>
     <div class="formrow">
       <label>Email ${fieldTag(true)}</label>
-      <input id="person_email" type="email" value="${escapeHtml(draft.email)}" />
+      <input id="person_email" type="email" value="${escapeHtml(draft.email)}" ${lockAttr} />
     </div>
     <div class="formrow">
       <label>Organisation ${fieldTag(true)}</label>
-      <input id="person_org" type="text" value="${escapeHtml(draft.organisation)}" />
+      <input id="person_org" type="text" value="${escapeHtml(draft.organisation)}" ${lockAttr} />
     </div>
     <div class="formrow">
       <label>Job title ${fieldTag(false)}</label>
-      <input id="person_title" type="text" value="${escapeHtml(draft.jobTitle)}" />
+      <input id="person_title" type="text" value="${escapeHtml(draft.jobTitle)}" ${lockAttr} />
     </div>
+    ${lockHint}
     ${personEditorState.error ? `<div class="item__error">${escapeHtml(personEditorState.error)}</div>` : ""}
   `;
 
@@ -1338,7 +1516,6 @@ function renderPeopleManager() {
     return;
   }
 
-  const activePerson = personViewId ? getPerson(personViewId) : null;
   const owned = activePerson ? alive(db.items).filter(it => it.ownerId === activePerson.id) : [];
   owned.sort((a,b)=>Date.parse(b.updatedAt)-Date.parse(a.updatedAt));
 
@@ -2446,6 +2623,65 @@ function renderSearch() {
 }
 
 /**
+ * Builds a notes string for action items linked into the Tasks module.
+ * @param {object} item Action item record.
+ * @returns {string} Multi-line notes string for display.
+ */
+function buildActionTaskNotes(item) {
+  const meeting = getMeeting(item.meetingId);
+  const topic = getTopic(item.topicId);
+  const targets = (item.updateTargets || [])
+    .map(pid => getPerson(pid)?.name)
+    .filter(Boolean);
+
+  const lines = [];
+  if (meeting) lines.push(`Meeting: ${meeting.title || "(Untitled)"}`);
+  if (topic) lines.push(`Topic: ${topic.name}`);
+  if (targets.length) lines.push(`Update targets: ${targets.join(", ")}`);
+  return lines.join("\n");
+}
+
+/**
+ * Creates the combined task list, including linked action items owned by "Me".
+ * @returns {object[]} Normalized task views for rendering.
+ */
+function buildTaskViews() {
+  const tasks = alive(db.tasks).map(task => ({
+    id: task.id,
+    sourceType: "task",
+    title: task.title,
+    notes: task.notes || "",
+    dueDate: task.dueDate || "",
+    priority: task.priority || "medium",
+    status: task.status || "todo",
+    updatedAt: task.updatedAt,
+    createdAt: task.createdAt,
+  }));
+
+  const meId = getDefaultPersonId();
+  const actionItems = meId
+    ? alive(db.items).filter(item => item.section === "action" && item.ownerId === meId)
+    : [];
+
+  const linkedActions = actionItems.map(item => ({
+    id: item.id,
+    sourceType: "item",
+    title: item.text || "Untitled action",
+    notes: buildActionTaskNotes(item),
+    dueDate: item.dueDate || "",
+    priority: "medium",
+    status: mapActionStatusToTaskStatus(item.status),
+    updatedAt: item.updatedAt,
+    createdAt: item.createdAt,
+    meetingId: item.meetingId,
+    topicId: item.topicId,
+    link: item.link || "",
+  }));
+
+  return [...tasks, ...linkedActions];
+}
+
+/**
  * Renders the Tasks module list view.
  */
 function renderTasks() {
@@ -2461,7 +2697,8 @@ function renderTasks() {
   if (statusSelect && document.activeElement !== statusSelect) statusSelect.value = statusFilter;
   if (prioritySelect && document.activeElement !== prioritySelect) prioritySelect.value = priorityFilter;
 
-  const filtered = alive(db.tasks).filter(task => {
+  const taskViews = buildTaskViews();
+  const filtered = taskViews.filter(task => {
     const statusOk = statusFilter ? task.status === statusFilter : true;
     const priorityOk = priorityFilter ? task.priority === priorityFilter : true;
     return statusOk && priorityOk;
@@ -2487,7 +2724,7 @@ function renderTasks() {
   countEl.textContent = `${filtered.length} task${filtered.length === 1 ? "" : "s"} shown`;
 
   if (!sorted.length) {
-    list.innerHTML = `<div class="muted">No tasks yet. Add your first task to get started.</div>`;
+    list.innerHTML = `<div class="muted">No tasks or linked action items yet. Add your first task to get started.</div>`;
     return;
   }
 
@@ -2506,19 +2743,25 @@ function renderTaskCard(task) {
   const statusLabel = TASK_STATUS_LABELS[statusKey] || statusKey;
   const priorityLabel = TASK_PRIORITY_LABELS[priorityKey] || priorityKey;
   const dueLabel = formatTaskDueDate(task.dueDate);
+  const isLinkedAction = task.sourceType === "item";
+  const detailsLabel = isLinkedAction ? "Details" : "Notes";
+  const detailsText = task.notes || (isLinkedAction ? "No details captured yet." : "No notes yet.");
+  const sourceBadge = isLinkedAction ? `<span class="badge badge--accent">Action item</span>` : "";
+  const sourceMeta = isLinkedAction ? " • Linked from meetings" : "";
 
   // Status and priority color classes for visual scanning.
   const statusBadgeClass = `status-pill status-pill--${statusKey}`;
   const priorityBadgeClass = `priority-pill priority-pill--${priorityKey}`;
 
   return `
-    <div class="task-card" data-task-id="${task.id}">
+    <div class="task-card" data-task-id="${task.id}" data-task-source="${escapeHtml(task.sourceType || "task")}">
       <div class="task-card__header">
         <div>
           <div class="task-card__title">${escapeHtml(task.title)}</div>
-          <div class="task-card__meta">Updated ${escapeHtml(fmtDateTime(task.updatedAt))}</div>
+          <div class="task-card__meta">Updated ${escapeHtml(fmtDateTime(task.updatedAt))}${sourceMeta}</div>
         </div>
         <div class="task-card__badges">
+          ${sourceBadge}
           <span class="badge ${statusBadgeClass}">${escapeHtml(statusLabel)}</span>
           <span class="badge ${priorityBadgeClass}">${escapeHtml(priorityLabel)}</span>
           <span class="badge">Due: ${escapeHtml(dueLabel)}</span>
@@ -2530,8 +2773,8 @@ function renderTaskCard(task) {
           <input type="text" value="${escapeHtml(task.title)}" readonly />
         </div>
         <div class="task-field">
-          <label>Notes</label>
-          <textarea readonly>${escapeHtml(task.notes || "No notes yet.")}</textarea>
+          <label>${escapeHtml(detailsLabel)}</label>
+          <textarea readonly>${escapeHtml(detailsText)}</textarea>
         </div>
         <div class="task-field-grid">
           <div class="task-field">
@@ -2554,6 +2797,8 @@ function renderTaskCard(task) {
         </div>
       </div>
       <div class="task-card__actions">
+        ${isLinkedAction && task.meetingId ? `<button class="smallbtn" data-task-action="open-meeting" data-task-meeting="${escapeHtml(task.meetingId)}">Open meeting</button>` : ""}
+        ${isLinkedAction && task.link ? `<button class="smallbtn" data-task-action="open-link" data-task-link="${escapeHtml(task.link)}">Open link</button>` : ""}
         <button class="smallbtn smallbtn--danger" data-task-action="delete">Delete</button>
       </div>
     </div>
@@ -2571,12 +2816,21 @@ function wireTaskList(container) {
       const card = select.closest("[data-task-id]");
       if (!card) return;
       const taskId = card.getAttribute("data-task-id");
-      const task = getTask(taskId);
-      if (!task) return;
+      const sourceType = card.getAttribute("data-task-source") || "task";
 
-      task.status = select.value || "todo";
-      task.updatedAt = nowIso();
-      select.className = `task-status task-status--${task.status}`;
+      if (sourceType === "item") {
+        const item = getItem(taskId);
+        if (!item) return;
+        item.status = mapTaskStatusToActionStatus(select.value || "todo");
+        item.updatedAt = nowIso();
+      } else {
+        const task = getTask(taskId);
+        if (!task) return;
+        task.status = select.value || "todo";
+        task.updatedAt = nowIso();
+      }
+
+      select.className = `task-status task-status--${select.value || "todo"}`;
       markDirty();
       await saveLocal();
       renderTasks();
@@ -2588,16 +2842,48 @@ function wireTaskList(container) {
       const card = btn.closest("[data-task-id]");
       if (!card) return;
       const taskId = card.getAttribute("data-task-id");
-      const task = getTask(taskId);
-      if (!task) return;
+      const sourceType = card.getAttribute("data-task-source") || "task";
 
-      const confirmDelete = confirm("Delete this task? This cannot be undone.");
-      if (!confirmDelete) return;
-      task.deleted = true;
-      task.updatedAt = nowIso();
+      if (sourceType === "item") {
+        const item = getItem(taskId);
+        if (!item) return;
+        const confirmDelete = confirm("Delete this linked action item? It will be removed from meeting notes.");
+        if (!confirmDelete) return;
+        item.deleted = true;
+        item.updatedAt = nowIso();
+      } else {
+        const task = getTask(taskId);
+        if (!task) return;
+        const confirmDelete = confirm("Delete this task? This cannot be undone.");
+        if (!confirmDelete) return;
+        task.deleted = true;
+        task.updatedAt = nowIso();
+      }
       markDirty();
       await saveLocal();
       renderTasks();
+    });
+  });
+
+  container.querySelectorAll("[data-task-action='open-meeting']").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const meetingId = btn.getAttribute("data-task-meeting");
+      const meeting = getMeeting(meetingId);
+      if (!meeting) return;
+      currentMeetingId = meetingId;
+      await saveMeta();
+      setMeetingView("notes");
+      setActiveModule("meetings");
+      setMeetingModuleTab("meeting");
+      renderAll();
+    });
+  });
+
+  container.querySelectorAll("[data-task-action='open-link']").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const link = btn.getAttribute("data-task-link");
+      if (!link) return;
+      window.open(link, "_blank", "noopener,noreferrer");
     });
   });
 }
@@ -3429,6 +3715,11 @@ function wirePeopleControls() {
 
   byId("person_save_btn").addEventListener("click", async () => {
     if (!personEditorState.draft) return;
+    const activePerson = personViewId ? getPerson(personViewId) : null;
+    if (activePerson && isDefaultPerson(activePerson)) {
+      alert("The default person details are locked and cannot be edited.");
+      return;
+    }
     const name = byId("person_name")?.value.trim() || "";
     const email = byId("person_email")?.value.trim() || "";
     const organisation = byId("person_org")?.value.trim() || "";
