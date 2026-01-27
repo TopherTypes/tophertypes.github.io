@@ -429,26 +429,25 @@ label{
 
 /* Task list table layout */
 .task-table-wrapper{
-  overflow-x:auto;
+  /* Keep the task table visible without forcing horizontal scrolling. */
+  overflow-x:visible;
   padding-bottom:4px;
 }
 .task-table{
   display:flex;
   flex-direction:column;
   gap:10px;
-  min-width:1200px;
+  /* Allow the table to shrink to the container width. */
+  min-width:0;
 }
 .task-row{
   display:grid;
   grid-template-columns:
-    minmax(220px, 2.2fr)
+    minmax(220px, 2.4fr)
     minmax(220px, 2fr)
-    minmax(160px, 1.1fr)
-    minmax(140px, 0.9fr)
-    minmax(140px, 0.9fr)
-    minmax(140px, 0.9fr)
-    minmax(180px, 1.1fr)
-    minmax(220px, 1.3fr)
+    minmax(150px, 1fr)
+    minmax(150px, 1fr)
+    minmax(160px, 1fr)
     minmax(150px, 0.8fr);
   gap:12px;
   align-items:start;
@@ -462,6 +461,13 @@ label{
   text-transform:uppercase;
   font-size:11px;
   letter-spacing:0.7px;
+}
+.task-row--header > div{
+  /* Prevent header labels from overflowing their grid cells. */
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
 }
 .task-row:not(.task-row--header){
   padding:12px;
