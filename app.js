@@ -1648,15 +1648,20 @@ function renderSettings() {
   });
 }
 
+/**
+ * Renders project (topic) selectors across the meetings and updates modules.
+ */
 function renderTopics() {
   const topicSel = byId("meeting_topic");
   const topicsSel = byId("topics_topic");
+  const updatesProjectSel = byId("updates_project");
 
   const topics = alive(db.topics).sort((a,b)=>a.name.localeCompare(b.name));
   const opts = topics.map(t => ({ value:t.id, label:t.name }));
 
-  renderSelectOptions(topicSel, opts, { placeholder: topics.length ? null : "No topics yet — add one" });
-  renderSelectOptions(topicsSel, opts, { placeholder: topics.length ? "Choose a topic…" : "No topics yet" });
+  renderSelectOptions(topicSel, opts, { placeholder: topics.length ? null : "No projects yet — add one" });
+  renderSelectOptions(topicsSel, opts, { placeholder: topics.length ? "Choose a project…" : "No projects yet" });
+  renderSelectOptions(updatesProjectSel, opts, { placeholder: "All projects" });
 }
 
 function renderPeopleSelects() {
@@ -1899,7 +1904,7 @@ function renderActionsFiltersOptions() {
   renderSelectOptions(
     topicSel,
     topics.map(t => ({ value:t.id, label:t.name })),
-    { placeholder: "All topics" }
+    { placeholder: "All projects" }
   );
 }
 
@@ -1996,14 +2001,14 @@ function renderCurrentMeetingHeader() {
 
   label.innerHTML = `
     <div><strong>${escapeHtml(meeting.title || "(Untitled meeting)")}</strong></div>
-    <div class="muted">${escapeHtml(tpl?.name || "Template")} • ${escapeHtml(topic?.name || "No topic")} • ${fmtDateTime(meeting.datetime)}${oneToOneLabel}</div>
+    <div class="muted">${escapeHtml(tpl?.name || "Template")} • ${escapeHtml(topic?.name || "No project")} • ${fmtDateTime(meeting.datetime)}${oneToOneLabel}</div>
   `;
 
   const oneToOneUpdatesCard = oneToOneContext ? renderOneToOneUpdatesCard(meeting, oneToOneContext) : "";
 
   area.innerHTML = `
     <h2>Meeting notes</h2>
-    <div class="muted">Template: <strong>${escapeHtml(tpl?.name || "")}</strong> • Topic: <strong>${escapeHtml(topic?.name || "")}</strong></div>
+    <div class="muted">Template: <strong>${escapeHtml(tpl?.name || "")}</strong> • Project: <strong>${escapeHtml(topic?.name || "")}</strong></div>
     ${oneToOneUpdatesCard}
     <div class="sectioncard scratchpad-card">
       <div class="sectionhead">
@@ -2520,7 +2525,7 @@ function renderItemCard(it) {
       ${it.notes ? `<div class="item__notes">${escapeHtml(it.notes)}</div>` : ""}
 
       <div class="item__meta">
-        ${topic ? `<span>Topic: <strong>${escapeHtml(topic.name)}</strong></span>` : ""}
+        ${topic ? `<span>Project: <strong>${escapeHtml(topic.name)}</strong></span>` : ""}
         ${owner ? `<span>Owner: <strong>${escapeHtml(owner.name)}</strong></span>` : ""}
         ${targets.length ? `<span>Update: <strong>${escapeHtml(targets.join(", "))}</strong></span>` : ""}
       </div>
@@ -2710,10 +2715,10 @@ function renderQuickSearch() {
 /**
  * Builds a concise calendar summary line for a meeting.
  * @param {object} meeting Meeting record for the calendar.
- * @returns {string} Summary string with topic, time, and 1:1 counterpart when applicable.
+ * @returns {string} Summary string with project, time, and 1:1 counterpart when applicable.
  */
 function buildCalendarMeetingMeta(meeting) {
-  const topic = getTopic(meeting.topicId)?.name || "No topic";
+  const topic = getTopic(meeting.topicId)?.name || "No project";
   const time = formatTime(meeting.datetime) || "Time TBD";
   const template = getTemplate(meeting.templateId);
   const oneToOneContext = template?.id === ONE_TO_ONE_TEMPLATE_ID ? getOneToOneContext(meeting) : null;
@@ -2836,6 +2841,8 @@ function resetMeetingCalendarToToday() {
 
 function renderUpdates() {
   const personId = byId("updates_person").value || "";
+  // Project filter narrows updates to a specific project (topic).
+  const projectId = byId("updates_project")?.value || "";
   const filter = byId("updates_filter").value.trim().toLowerCase();
   const list = byId("updates_list");
   const count = byId("updates_count");
@@ -2850,6 +2857,7 @@ function renderUpdates() {
     if (!it.updateTargets || !it.updateTargets.includes(personId)) return false;
     const st = it.updateStatus?.[personId];
     if (st?.updated) return false;
+    if (projectId && it.topicId !== projectId) return false;
     return true;
   }).filter(it => {
     if (!filter) return true;
@@ -2911,7 +2919,7 @@ function renderTopicOverview() {
   const out = byId("topic_output");
 
   if (!topicId) {
-    out.innerHTML = `<div class="muted">Choose a topic.</div>`;
+    out.innerHTML = `<div class="muted">Choose a project.</div>`;
     return;
   }
 
@@ -2952,7 +2960,7 @@ function renderTopicOverview() {
     <div class="item">
       <div class="item__top">
         <div>
-          <strong>${escapeHtml(topic?.name || "Topic")}</strong>
+          <strong>${escapeHtml(topic?.name || "Project")}</strong>
           <div class="muted">${items.length} item(s) across all meetings</div>
         </div>
         <div class="badges"><span class="badge badge--accent">${escapeHtml(topicId)}</span></div>
@@ -3003,7 +3011,7 @@ function buildActionTaskNotes(item) {
 
   const lines = [];
   if (meeting) lines.push(`Meeting: ${meeting.title || "(Untitled)"}`);
-  if (topic) lines.push(`Topic: ${topic.name}`);
+  if (topic) lines.push(`Project: ${topic.name}`);
   if (targets.length) lines.push(`Update targets: ${targets.join(", ")}`);
   return lines.join("\n");
 }
@@ -3141,7 +3149,7 @@ function renderTaskCard(task) {
     ? ""
     : [
       meeting ? `Meeting: ${meeting.title || "Untitled"}` : null,
-      topic ? `Topic: ${topic.name}` : null,
+      topic ? `Project: ${topic.name}` : null,
     ].filter(Boolean).join(" • ");
   // Hidden columns remain in data, but are intentionally not shown in the condensed layout.
 
@@ -3524,7 +3532,7 @@ function openMeetingEditLightbox(meetingId) {
 }
 
 /**
- * Opens the topic creation lightbox and resets validation state.
+ * Opens the project creation lightbox and resets validation state.
  */
 function openTopicLightbox() {
   const input = byId("topic_name_input");
@@ -3616,12 +3624,12 @@ function clearTaskForm() {
 }
 
 /**
- * Reads the topic creation input, validates, and persists a new topic.
+ * Reads the project creation input, validates, and persists a new project.
  */
 async function addTopicFromLightbox() {
   const name = byId("topic_name_input")?.value.trim() || "";
   if (!name) {
-    setLightboxError("topic_lightbox_error", "Topic name is required.");
+    setLightboxError("topic_lightbox_error", "Project name is required.");
     return;
   }
 
@@ -3743,7 +3751,7 @@ async function saveMeetingFromLightbox() {
   const isOneToOneTemplate = templateId === ONE_TO_ONE_TEMPLATE_ID;
 
   if (!templateId) { alert("Choose a template."); return; }
-  if (!topicId) { alert("Choose or add a topic."); return; }
+  if (!topicId) { alert("Choose or add a project."); return; }
   if (isOneToOneTemplate) {
     if (!oneToOnePersonId && !oneToOneGroupId) {
       alert("Select a person or group for the 1:1 meeting.");
@@ -3872,7 +3880,7 @@ function buildMeetingSummary(meetingId) {
   lines.push(`Meeting: ${m.title || "(Untitled)"}`);
   lines.push(`Date: ${fmtDateTime(m.datetime)}`);
   lines.push(`Template: ${tpl?.name || ""}`);
-  lines.push(`Topic: ${topic?.name || ""}`);
+  lines.push(`Project: ${topic?.name || ""}`);
   if (tpl?.id === ONE_TO_ONE_TEMPLATE_ID) {
     const context = getOneToOneContext(m);
     if (context) {
@@ -3944,12 +3952,14 @@ async function markAllShownUpdates() {
 
 async function copyPendingUpdatesText() {
   const personId = byId("updates_person").value || "";
+  const projectId = byId("updates_project")?.value || "";
   if (!personId) return;
   const person = getPerson(personId);
 
   const pending = alive(db.items).filter(it => {
     if (!it.updateTargets || !it.updateTargets.includes(personId)) return false;
     const st = it.updateStatus?.[personId];
+    if (projectId && it.topicId !== projectId) return false;
     return !st?.updated;
   }).sort((a,b)=>Date.parse(b.updatedAt)-Date.parse(a.updatedAt));
 
@@ -3959,7 +3969,7 @@ async function copyPendingUpdatesText() {
   lines.push("");
 
   for (const it of pending) {
-    const topic = getTopic(it.topicId)?.name || "No topic";
+    const topic = getTopic(it.topicId)?.name || "No project";
     const meeting = getMeeting(it.meetingId);
     const when = meeting ? fmtDateTime(meeting.datetime) : "";
     lines.push(`- [${topic}] ${it.text} (${it.section}${when ? ` • ${when}` : ""})`);
@@ -4125,6 +4135,7 @@ function wireMeetingControls() {
 
 function wireUpdatesControls() {
   byId("updates_person").addEventListener("change", renderUpdates);
+  byId("updates_project").addEventListener("change", renderUpdates);
   byId("updates_filter").addEventListener("input", debounce(renderUpdates, 150));
   byId("mark_updates_btn").addEventListener("click", markAllShownUpdates);
   byId("copy_updates_btn").addEventListener("click", copyPendingUpdatesText);
@@ -4147,6 +4158,8 @@ function wireActionsControls() {
 }
 
 function wireTopicControls() {
+  // Project management lives in the former "Topics" module; reuse the same lightbox workflow.
+  byId("project_open_lightbox_btn")?.addEventListener("click", openTopicLightbox);
   byId("topics_topic").addEventListener("change", renderTopicOverview);
   byId("topics_focus").addEventListener("change", renderTopicOverview);
 }
