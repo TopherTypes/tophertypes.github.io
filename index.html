@@ -540,16 +540,33 @@
     <section class="module-panel" id="module_settings">
       <div class="grid2">
         <div class="card">
-          <h2>Defaults</h2>
+          <h2>Sync preferences</h2>
           <div class="formrow">
-            <label>Default owner name</label>
-            <input id="default_owner_name" type="text" placeholder="e.g., Taylor" />
+            <label for="sync_frequency">Sync frequency</label>
+            <select id="sync_frequency" data-setting-path="sync.frequencyMinutes" data-setting-type="number">
+              <option value="0">Manual only</option>
+              <option value="15">Every 15 minutes</option>
+              <option value="30">Every 30 minutes</option>
+              <option value="60">Hourly</option>
+              <option value="240">Every 4 hours</option>
+            </select>
           </div>
-          <div class="muted">Matches an existing person name for the Actions default filter.</div>
+          <div class="formrow">
+            <label>
+              <input type="checkbox" id="sync_on_launch" data-setting-path="sync.autoSyncOnLaunch" data-setting-type="checkbox" />
+              Auto-sync on launch
+            </label>
+          </div>
+          <div class="formrow">
+            <label>
+              <input type="checkbox" id="sync_on_reconnect" data-setting-path="sync.autoSyncOnReconnect" data-setting-type="checkbox" />
+              Auto-sync after reconnecting
+            </label>
+          </div>
+          <p class="muted">
+            These preferences are stored for future automation. Background sync behaviors can be expanded here later.
+          </p>
         </div>
-      </div>
-
-      <div class="grid2">
         <div class="card">
           <h2>Backup</h2>
           <div class="row row--space">
@@ -560,12 +577,6 @@
           <p class="muted">
             Import merges into your local data. You can then Sync to Drive if you want.
           </p>
-        </div>
-
-        <div class="card">
-          <h2>Templates</h2>
-          <div class="muted">This version ships with Standard + 1:1 templates. We can add more later.</div>
-          <div id="templates_list" class="list"></div>
         </div>
       </div>
     </section>

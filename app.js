@@ -221,6 +221,136 @@ function createDefaultPersonRecord() {
 }
 
 /**
+ * Builds the default settings object for the app.
+ * @returns {object} Default settings structure.
+ */
+function buildDefaultSettings() {
+  return {
+    sync: {
+      frequencyMinutes: 30,
+      autoSyncOnLaunch: true,
+      autoSyncOnReconnect: true,
+    },
+    updatedAt: nowIso(),
+  };
+}
+
+/**
+ * Ensures settings exist and are normalized to the latest schema.
+ * @param {object} targetDb Database instance to normalize.
+ * @returns {boolean} Whether any updates were applied.
+ */
+function normalizeSettings(targetDb) {
+  if (!targetDb) return false;
+  const defaults = buildDefaultSettings();
+  let changed = false;
+
+  if (!targetDb.settings || typeof targetDb.settings !== "object") {
+    targetDb.settings = defaults;
+    return true;
+  }
+
+  if (!targetDb.settings.sync || typeof targetDb.settings.sync !== "object") {
+    targetDb.settings.sync = { ...defaults.sync };
+    changed = true;
+  } else {
+    if (typeof targetDb.settings.sync.frequencyMinutes !== "number") {
+      targetDb.settings.sync.frequencyMinutes = defaults.sync.frequencyMinutes;
+      changed = true;
+    }
+    if (typeof targetDb.settings.sync.autoSyncOnLaunch !== "boolean") {
+      targetDb.settings.sync.autoSyncOnLaunch = defaults.sync.autoSyncOnLaunch;
+      changed = true;
+    }
+    if (typeof targetDb.settings.sync.autoSyncOnReconnect !== "boolean") {
+      targetDb.settings.sync.autoSyncOnReconnect = defaults.sync.autoSyncOnReconnect;
+      changed = true;
+    }
+  }
+
+  if (!targetDb.settings.updatedAt) {
+    targetDb.settings.updatedAt = nowIso();
+    changed = true;
+  }
+
+  if (changed) {
+    targetDb.settings.updatedAt = nowIso();
+  }
+
+  return changed;
+}
+
+/**
+ * Reads a nested settings value from the active database.
+ * @param {string} path Dot-separated path for the setting key.
+ * @returns {unknown} Setting value or undefined if missing.
+ */
+function getSettingValue(path) {
+  const keys = path.split(".");
+  let cursor = db?.settings;
+  for (const key of keys) {
+    if (!cursor || typeof cursor !== "object") return undefined;
+    cursor = cursor[key];
+  }
+  return cursor;
+}
+
+/**
+ * Updates a nested settings value on the database, creating objects as needed.
+ * @param {string} path Dot-separated path for the setting key.
+ * @param {unknown} value New value to persist.
+ * @returns {boolean} Whether the value changed.
+ */
+function setSettingValue(path, value) {
+  const keys = path.split(".");
+  let cursor = db.settings;
+  for (let i = 0; i < keys.length - 1; i += 1) {
+    const key = keys[i];
+    if (!cursor[key] || typeof cursor[key] !== "object") {
+      cursor[key] = {};
+    }
+    cursor = cursor[key];
+  }
+  const lastKey = keys[keys.length - 1];
+  if (cursor[lastKey] === value) return false;
+  cursor[lastKey] = value;
+  return true;
+}
+
+/**
+ * Normalizes values coming from settings inputs for safe persistence.
+ * @param {string} path Dot-separated path for the setting key.
+ * @param {unknown} rawValue Raw UI value.
+ * @returns {unknown} Cleaned value for storage.
+ */
+function coerceSettingValue(path, rawValue) {
+  if (path === "sync.frequencyMinutes") {
+    const asNumber = Number(rawValue);
+    if (Number.isNaN(asNumber) || asNumber < 0) {
+      return buildDefaultSettings().sync.frequencyMinutes;
+    }
+    return asNumber;
+  }
+  return rawValue;
+}
+
+/**
+ * Reads a settings value from a form control element.
+ * @param {HTMLElement} control Form control with data-setting metadata.
+ * @returns {unknown} Parsed control value.
+ */
+function readSettingControlValue(control) {
+  const type = control.dataset.settingType || control.type;
+  if (type === "checkbox") {
+    return control.checked;
+  }
+  if (type === "number") {
+    return Number(control.value);
+  }
+  return control.value;
+}
+
+/**
  * Renders required field indicators.
  * @param {boolean} required Whether a field is required.
  * @param {string} key Optional key to target later updates.
@@ -550,10 +680,7 @@ function makeDefaultDb() {
   return {
     schemaVersion: 1,
     updatedAt: nowIso(),
-    settings: {
-      defaultOwnerName: DEFAULT_PERSON_NAME,
-      updatedAt: nowIso(),
-    },
+    settings: buildDefaultSettings(),
     templates: createBuiltinTemplates(),
     people: [defaultPerson],
     groups: [],
@@ -956,8 +1083,8 @@ function mergeDb(localDb, remoteDb) {
   // schema guard
   const l = localDb || makeDefaultDb();
   const r = remoteDb || makeDefaultDb();
-  const lSettings = l.settings || { defaultOwnerName: "", updatedAt: l.updatedAt || nowIso() };
-  const rSettings = r.settings || { defaultOwnerName: "", updatedAt: r.updatedAt || nowIso() };
+  const lSettings = l.settings || buildDefaultSettings();
+  const rSettings = r.settings || buildDefaultSettings();
 
   const merged = {
     schemaVersion: 1,
@@ -973,6 +1100,10 @@ function mergeDb(localDb, remoteDb) {
   };
 
   if (normalizeBuiltinTemplates(merged)) {
+    merged.updatedAt = nowIso();
+  }
+
+  if (normalizeSettings(merged)) {
     merged.updatedAt = nowIso();
   }
 
@@ -1004,19 +1135,15 @@ async function loadLocal() {
     await idbSet("db", db);
   }
 
-  if (!db.settings) {
-    db.settings = { defaultOwnerName: "", updatedAt: nowIso() };
+  if (normalizeSettings(db)) {
+    markDirty();
+    await saveLocal();
   }
   if (!db.tasks) {
     db.tasks = [];
   }
 
   let defaultPersonResult = ensureDefaultPersonInDb(db);
-  if (!db.settings.defaultOwnerName) {
-    db.settings.defaultOwnerName = DEFAULT_PERSON_NAME;
-    db.settings.updatedAt = nowIso();
-    defaultPersonResult = { ...defaultPersonResult, changed: true };
-  }
 
   if (normalizeBuiltinTemplates(db)) {
     markDirty();
@@ -1498,24 +1625,27 @@ function renderSelectOptions(select, options, {placeholder=null} = {}) {
 
 function renderTemplates() {
   const tplSel = byId("meeting_template");
-  const tplList = byId("templates_list");
-
+  if (!tplSel) return;
   const templates = alive(db.templates);
   renderSelectOptions(tplSel, templates.map(t => ({ value:t.id, label:t.name })));
+}
 
-  tplList.innerHTML = templates.map(t => `
-    <div class="item">
-      <div class="item__top">
-        <div><strong>${escapeHtml(t.name)}</strong></div>
-        <div class="badges">
-          <span class="badge">${escapeHtml(t.id)}</span>
-        </div>
-      </div>
-      <div class="item__meta">
-        ${t.sections.map(s => `<span class="badge badge--accent">${escapeHtml(s.label)}</span>`).join("")}
-      </div>
-    </div>
-  `).join("");
+/**
+ * Syncs settings form controls with the persisted settings values.
+ */
+function renderSettings() {
+  document.querySelectorAll("[data-setting-path]").forEach(control => {
+    if (document.activeElement === control) return;
+    const path = control.dataset.settingPath;
+    const currentValue = getSettingValue(path);
+    if (typeof currentValue === "undefined") return;
+    const type = control.dataset.settingType || control.type;
+    if (type === "checkbox") {
+      control.checked = Boolean(currentValue);
+    } else {
+      control.value = String(currentValue);
+    }
+  });
 }
 
 function renderTopics() {
@@ -1750,13 +1880,6 @@ function renderPeopleManager() {
 
   wireItemButtons(ownedList);
   wireItemButtons(targetList);
-}
-
-function getDefaultActionsOwnerId() {
-  const name = db.settings?.defaultOwnerName?.trim() || "";
-  if (!name) return "";
-  const match = alive(db.people).find(p => p.name.toLowerCase() === name.toLowerCase());
-  return match ? match.id : "";
 }
 
 function renderActionsFiltersOptions() {
@@ -2757,7 +2880,7 @@ function renderActionsDashboard() {
   if (!ownerSel || !topicSel || !statusSel || !list) return;
 
   if (actionsFilters.ownerId === null) {
-    actionsFilters.ownerId = getDefaultActionsOwnerId();
+    actionsFilters.ownerId = getDefaultPersonId();
     saveMeta().catch(console.error);
   }
 
@@ -3248,6 +3371,7 @@ function renderAll() {
   renderGroups();
   renderActionsFiltersOptions();
   renderCurrentMeetingHeader();
+  renderSettings();
 
   // update overview selects might have changed
   renderUpdates();
@@ -3257,11 +3381,6 @@ function renderAll() {
   renderQuickSearch();
   renderMeetingCalendar();
   renderTasks();
-
-  const defaultOwnerInput = byId("default_owner_name");
-  if (defaultOwnerInput && document.activeElement !== defaultOwnerInput) {
-    defaultOwnerInput.value = db.settings?.defaultOwnerName || "";
-  }
   syncMeetingOneToOneFields();
 }
 
@@ -4062,17 +4181,23 @@ function wireSettingsControls() {
     });
   }
 
-  const defaultOwnerInput = byId("default_owner_name");
-  if (defaultOwnerInput) {
-    defaultOwnerInput.addEventListener("input", debounce(async () => {
-      db.settings = db.settings || { defaultOwnerName: "", updatedAt: nowIso() };
-      db.settings.defaultOwnerName = defaultOwnerInput.value.trim();
-      db.settings.updatedAt = nowIso();
-      markDirty();
-      await saveLocal();
-      renderActionsDashboard();
-    }, 200));
-  }
+  // Generic wiring for settings controls to keep expansion easy as new fields are added.
+  document.querySelectorAll("[data-setting-path]").forEach(control => {
+    const path = control.dataset.settingPath;
+    const eventName = control.dataset.settingType === "checkbox" || control.type === "checkbox" ? "change" : "input";
+    const handler = async () => {
+      db.settings = db.settings || buildDefaultSettings();
+      const rawValue = readSettingControlValue(control);
+      const value = coerceSettingValue(path, rawValue);
+      if (setSettingValue(path, value)) {
+        db.settings.updatedAt = nowIso();
+        markDirty();
+        await saveLocal();
+      }
+    };
+    const wrappedHandler = eventName === "input" ? debounce(handler, 200) : handler;
+    control.addEventListener(eventName, wrappedHandler);
+  });
 }
 
 function wirePeopleControls() {
