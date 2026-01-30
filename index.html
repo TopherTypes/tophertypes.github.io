@@ -316,25 +316,6 @@
         </div>
       </div>
 
-      <!-- Project creation lightbox -->
-      <div class="lightbox" id="topic_lightbox" aria-hidden="true">
-        <div class="lightbox__backdrop" data-lightbox-close="true"></div>
-        <div class="lightbox__panel" role="dialog" aria-modal="true" aria-labelledby="topic_lightbox_title">
-          <div class="lightbox__header">
-            <h3 id="topic_lightbox_title">Add a project</h3>
-            <button class="iconbtn" data-lightbox-close="true" aria-label="Close project form">✕</button>
-          </div>
-          <div class="formrow">
-            <label>Project name</label>
-            <input id="topic_name_input" type="text" placeholder="e.g., Q4 planning" />
-          </div>
-          <div class="item__error" id="topic_lightbox_error" hidden></div>
-          <div class="row row--space">
-            <button class="btn btn--primary" id="topic_add_btn">Add project</button>
-            <button class="btn btn--ghost" data-lightbox-close="true" type="button">Cancel</button>
-          </div>
-        </div>
-      </div>
     </section>
 
     <!-- People module -->
@@ -389,7 +370,7 @@
       <div class="card">
         <h2>Meetings</h2>
         <div class="muted">All meetings tagged to this project.</div>
-        <div class="list" id="project_meetings_list"></div>
+        <div class="list list--compact" id="project_meetings_list"></div>
       </div>
     </section>
 
@@ -646,6 +627,26 @@
       </div>
     </section>
   </main>
+
+  <!-- Project creation lightbox (kept outside modules so it remains available across views) -->
+  <div class="lightbox" id="topic_lightbox" aria-hidden="true">
+    <div class="lightbox__backdrop" data-lightbox-close="true"></div>
+    <div class="lightbox__panel" role="dialog" aria-modal="true" aria-labelledby="topic_lightbox_title">
+      <div class="lightbox__header">
+        <h3 id="topic_lightbox_title">Add a project</h3>
+        <button class="iconbtn" data-lightbox-close="true" aria-label="Close project form">✕</button>
+      </div>
+      <div class="formrow">
+        <label>Project name</label>
+        <input id="topic_name_input" type="text" placeholder="e.g., Q4 planning" />
+      </div>
+      <div class="item__error" id="topic_lightbox_error" hidden></div>
+      <div class="row row--space">
+        <button class="btn btn--primary" id="topic_add_btn">Add project</button>
+        <button class="btn btn--ghost" data-lightbox-close="true" type="button">Cancel</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Helpful usage reminder -->
   <footer class="footer">
