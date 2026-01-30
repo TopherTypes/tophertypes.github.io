@@ -57,6 +57,10 @@ let syncInProgress = false;
 let hasUnsyncedChanges = false;
 let lastSyncAt = null;
 let lastRemoteModifiedTime = null;
+// Auto-sync cadence (30 seconds) for background refresh.
+const AUTO_SYNC_INTERVAL_MS = 30 * 1000;
+// Holds the interval ID for periodic auto-sync scheduling.
+let autoSyncTimerId = null;
 const itemEditState = new Map();
 let personViewId = null;
 let personEditorState = { isNew: false, draft: null, error: "" };
@@ -811,7 +815,7 @@ async function handleAuthClick() {
 
     // Optional: if we have unsynced changes, prompt to sync
     if (hasUnsyncedChanges && confirm("You have local changes. Sync now?")) {
-      await syncNow();
+      await syncNow({ silent: false, trigger: "post-auth" });
     }
   };
 
@@ -1649,19 +1653,60 @@ function markClean() {
    SYNC
 =================================== */
 
-async function syncNow() {
+/**
+ * Determines whether a silent auto-sync can run without user prompts.
+ * @returns {boolean} True when auth, connectivity, and sync state allow auto-sync.
+ */
+function canAutoSync() {
+  return driveReady && navigator.onLine && !syncInProgress;
+}
+
+/**
+ * Requests a silent auto-sync when local changes exist and conditions allow it.
+ * @param {string} trigger Describes the action that initiated the auto-sync request.
+ */
+function requestAutoSync(trigger) {
+  if (!hasUnsyncedChanges) return;
+  if (!canAutoSync()) return;
+  syncNow({ silent: true, trigger }).catch((error) => {
+    console.error("Auto-sync failed.", { trigger, error });
+  });
+}
+
+/**
+ * Starts or restarts the periodic auto-sync timer.
+ */
+function startAutoSyncTimer() {
+  if (autoSyncTimerId) {
+    clearInterval(autoSyncTimerId);
+  }
+  autoSyncTimerId = setInterval(() => {
+    requestAutoSync("interval");
+  }, AUTO_SYNC_INTERVAL_MS);
+}
+
+/**
+ * Runs a sync cycle with optional silent mode for auto-sync.
+ * @param {{ silent?: boolean, trigger?: string }} [options] Optional sync controls.
+ */
+async function syncNow(options = {}) {
+  const { silent = false, trigger = "manual" } = options || {};
   if (!driveReady) {
-    alert("Sign in first.");
+    if (!silent) {
+      alert("Sign in first.");
+    }
     return;
   }
   if (!navigator.onLine) {
-    alert("You appear to be offline. Sync will work when you're online.");
+    if (!silent) {
+      alert("You appear to be offline. Sync will work when you're online.");
+    }
     return;
   }
   if (syncInProgress) return;
 
   syncInProgress = true;
-  setSyncStatus("Syncing…", "accent");
+  setSyncStatus(silent ? "Auto-syncing…" : "Syncing…", "accent");
   byId("sync_btn").disabled = true;
 
   try {
@@ -1685,11 +1730,16 @@ async function syncNow() {
     markClean();
 
     renderAll();
-    setSyncStatus(`Synced ${fmtDateTime(lastSyncAt)}`, "ok");
+    setSyncStatus(
+      `${silent ? "Auto-synced" : "Synced"} ${fmtDateTime(lastSyncAt)}`,
+      "ok"
+    );
   } catch (e) {
     console.error(e);
-    setSyncStatus("Sync failed", "bad");
-    alert("Sync failed. Check console for details.");
+    setSyncStatus(silent ? "Auto-sync failed" : "Sync failed", silent ? "warn" : "bad");
+    if (!silent) {
+      alert("Sync failed. Check console for details.");
+    }
   } finally {
     syncInProgress = false;
     byId("sync_btn").disabled = false;
@@ -4067,6 +4117,8 @@ async function addTopicFromLightbox() {
     meetingTopic.value = topicId;
   }
   closeLightbox("topic_lightbox");
+  // Auto-sync after a user creates a project.
+  requestAutoSync("create-project");
 }
 
 /**
@@ -4090,6 +4142,8 @@ async function addGroupFromLightbox() {
   await saveLocal();
   renderAll();
   closeLightbox("group_lightbox");
+  // Auto-sync after a user creates a group.
+  requestAutoSync("create-group");
 }
 
 /**
@@ -4120,6 +4174,8 @@ async function addPersonFromLightbox() {
   await saveLocal();
   renderAll();
   closeLightbox("person_lightbox");
+  // Auto-sync after a user creates a person.
+  requestAutoSync("create-person");
 }
 
 /**
@@ -4166,6 +4222,8 @@ async function addTask() {
   markDirty();
   await saveLocal();
   renderTasks();
+  // Auto-sync after a user creates a task.
+  requestAutoSync("create-task");
 }
 
 async function saveMeetingFromLightbox() {
@@ -4233,6 +4291,8 @@ async function saveMeetingFromLightbox() {
   await saveLocal();
   await saveMeta();
   renderAll();
+  // Auto-sync after a user saves a meeting.
+  requestAutoSync("save-meeting");
 }
 
 /**
@@ -4489,7 +4549,9 @@ function wireLightboxControls() {
 function wireTopButtons() {
   byId("auth_btn").addEventListener("click", handleAuthClick);
   byId("signout_btn").addEventListener("click", handleSignoutClick);
-  byId("sync_btn").addEventListener("click", syncNow);
+  byId("sync_btn").addEventListener("click", () => {
+    syncNow({ silent: false, trigger: "manual" }).catch(console.error);
+  });
 }
 
 function wireMeetingControls() {
@@ -4693,6 +4755,8 @@ function wirePeopleControls() {
     markDirty();
     await saveLocal();
     renderAll();
+    // Auto-sync after a user saves person details.
+    requestAutoSync("save-person");
   });
 }
 
@@ -4737,6 +4801,8 @@ async function init() {
   setActiveModule(activeModule);
   setMeetingView(meetingView);
   updateAuthUi();
+  // Begin periodic auto-sync checks once the app is ready.
+  startAutoSyncTimer();
 }
 
 document.addEventListener("DOMContentLoaded", init);
