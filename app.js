@@ -1025,6 +1025,427 @@ function mergeCollections(localArr, remoteArr) {
   return out;
 }
 
+/**
+ * Builds a stable, comparable signature for an entity by sorting keys and omitting volatile fields.
+ * @param {object} entity Entity record to sign.
+ * @param {Set<string>} ignoreKeys Fields excluded from the signature.
+ * @returns {string} Stable JSON signature for equality comparisons.
+ */
+function buildEntitySignature(entity, ignoreKeys) {
+  const normalizeValue = (value) => {
+    if (Array.isArray(value)) {
+      return value.map(normalizeValue);
+    }
+    if (value && typeof value === "object") {
+      const sortedKeys = Object.keys(value).sort();
+      const normalized = {};
+      sortedKeys.forEach(key => {
+        normalized[key] = normalizeValue(value[key]);
+      });
+      return normalized;
+    }
+    return value;
+  };
+
+  const base = {};
+  Object.keys(entity || {})
+    .filter(key => !ignoreKeys.has(key))
+    .sort()
+    .forEach(key => {
+      base[key] = normalizeValue(entity[key]);
+    });
+  return JSON.stringify(base);
+}
+
+/**
+ * Dedupe a collection by collapsing entities with identical content signatures.
+ * @param {object[]} records Collection to dedupe.
+ * @param {object} options Dedupe options.
+ * @param {string[]} options.ignoreKeys Keys to exclude from signature comparisons.
+ * @returns {{ records: object[], idMap: Map<string, string>, changed: boolean }} Dedupe result.
+ */
+function dedupeCollectionBySignature(records, { ignoreKeys = [] } = {}) {
+  const signatureMap = new Map();
+  const indexMap = new Map();
+  const idMap = new Map();
+  const updated = [];
+  let changed = false;
+  const ignoreSet = new Set(ignoreKeys);
+
+  (records || []).forEach(record => {
+    if (!record || record.deleted) {
+      updated.push(record);
+      return;
+    }
+    const signature = buildEntitySignature(record, ignoreSet);
+    const existing = signatureMap.get(signature);
+    if (!existing) {
+      signatureMap.set(signature, record);
+      indexMap.set(record.id, updated.length);
+      updated.push(record);
+      return;
+    }
+
+    const winner = isoNewer(record.updatedAt, existing.updatedAt) ? record : existing;
+    const loser = winner === existing ? record : existing;
+    idMap.set(loser.id, winner.id);
+    changed = true;
+
+    if (winner !== existing) {
+      const index = indexMap.get(existing.id);
+      if (index !== undefined) {
+        updated[index] = winner;
+        indexMap.delete(existing.id);
+        indexMap.set(winner.id, index);
+      }
+      signatureMap.set(signature, winner);
+    }
+  });
+
+  return { records: updated, idMap, changed };
+}
+
+/**
+ * Enforces a single canonical default person, remapping any duplicates to one id.
+ * @param {object[]} people People collection to normalize.
+ * @returns {{ people: object[], idMap: Map<string, string>, changed: boolean, defaultPerson: object|null }}
+ */
+function enforceSingleDefaultPerson(people) {
+  const alivePeople = (people || []).filter(p => p && !p.deleted);
+  const candidates = alivePeople.filter(person =>
+    person.isDefault || (person.name || "").trim().toLowerCase() === DEFAULT_PERSON_NAME.toLowerCase()
+  );
+  const idMap = new Map();
+  let changed = false;
+
+  if (!candidates.length) {
+    return { people, idMap, changed, defaultPerson: null };
+  }
+
+  let winner = candidates[0];
+  candidates.forEach(candidate => {
+    if (candidate.isDefault && !winner.isDefault) {
+      winner = candidate;
+      return;
+    }
+    if (candidate.isDefault === winner.isDefault && isoNewer(candidate.updatedAt, winner.updatedAt)) {
+      winner = candidate;
+    }
+  });
+
+  const filtered = (people || []).filter(person => {
+    if (!person || person.deleted) return true;
+    const isDefaultCandidate = candidates.includes(person);
+    if (!isDefaultCandidate) return true;
+    if (person.id === winner.id) return true;
+    idMap.set(person.id, winner.id);
+    changed = true;
+    return false;
+  });
+
+  let winnerChanged = false;
+  if (winner.name !== DEFAULT_PERSON_NAME) {
+    winner.name = DEFAULT_PERSON_NAME;
+    winnerChanged = true;
+  }
+  if (winner.email) {
+    winner.email = "";
+    winnerChanged = true;
+  }
+  if (winner.organisation) {
+    winner.organisation = "";
+    winnerChanged = true;
+  }
+  if (winner.jobTitle) {
+    winner.jobTitle = "";
+    winnerChanged = true;
+  }
+  if (!winner.isDefault) {
+    winner.isDefault = true;
+    winnerChanged = true;
+  }
+  if (winner.deleted) {
+    winner.deleted = false;
+    winnerChanged = true;
+  }
+  if (winnerChanged) {
+    winner.updatedAt = nowIso();
+    changed = true;
+  }
+
+  return { people: filtered, idMap, changed, defaultPerson: winner };
+}
+
+/**
+ * Remaps update-status entries when person ids are deduped.
+ * @param {object} updateStatus Update-status map keyed by person id.
+ * @param {Map<string, string>} idMap Person id remapping.
+ * @returns {object} Remapped update-status object.
+ */
+function remapUpdateStatus(updateStatus, idMap) {
+  if (!updateStatus || typeof updateStatus !== "object") return updateStatus;
+  const out = {};
+  Object.entries(updateStatus).forEach(([personId, status]) => {
+    const mappedId = idMap.get(personId) || personId;
+    const existing = out[mappedId];
+    if (!existing) {
+      out[mappedId] = status;
+      return;
+    }
+    if (!existing.updated && status.updated) {
+      out[mappedId] = status;
+      return;
+    }
+    if (existing.updated && status.updated && isoNewer(status.updatedAt, existing.updatedAt)) {
+      out[mappedId] = status;
+    }
+  });
+  return out;
+}
+
+/**
+ * Applies a person id remap across every collection that references people.
+ * @param {object} targetDb Database instance to update.
+ * @param {Map<string, string>} idMap Person id remapping table.
+ * @returns {boolean} Whether any updates were applied.
+ */
+function remapPersonReferences(targetDb, idMap) {
+  if (!targetDb || !idMap.size) return false;
+  let changed = false;
+
+  const remapId = (value) => idMap.get(value) || value;
+  const remapArray = (values) => Array.from(new Set((values || []).map(remapId)));
+
+  (targetDb.items || []).forEach(item => {
+    if (!item) return;
+    let itemChanged = false;
+    const mappedOwner = item.ownerId ? remapId(item.ownerId) : item.ownerId;
+    if (mappedOwner !== item.ownerId) {
+      item.ownerId = mappedOwner;
+      itemChanged = true;
+    }
+    const mappedTargets = remapArray(item.updateTargets);
+    if (JSON.stringify(mappedTargets) !== JSON.stringify(item.updateTargets || [])) {
+      item.updateTargets = mappedTargets;
+      itemChanged = true;
+    }
+    const mappedStatus = remapUpdateStatus(item.updateStatus, idMap);
+    if (mappedStatus !== item.updateStatus) {
+      item.updateStatus = mappedStatus;
+      itemChanged = true;
+    }
+    if (itemChanged) {
+      item.updatedAt = nowIso();
+      changed = true;
+    }
+  });
+
+  (targetDb.tasks || []).forEach(task => {
+    if (!task) return;
+    let taskChanged = false;
+    const mappedOwner = task.ownerId ? remapId(task.ownerId) : task.ownerId;
+    if (mappedOwner !== task.ownerId) {
+      task.ownerId = mappedOwner;
+      taskChanged = true;
+    }
+    const mappedTargets = remapArray(task.updateTargets);
+    if (JSON.stringify(mappedTargets) !== JSON.stringify(task.updateTargets || [])) {
+      task.updateTargets = mappedTargets;
+      taskChanged = true;
+    }
+    const mappedStatus = remapUpdateStatus(task.updateStatus, idMap);
+    if (mappedStatus !== task.updateStatus) {
+      task.updateStatus = mappedStatus;
+      taskChanged = true;
+    }
+    if (taskChanged) {
+      task.updatedAt = nowIso();
+      changed = true;
+    }
+  });
+
+  (targetDb.groups || []).forEach(group => {
+    if (!group) return;
+    const mappedMembers = remapArray(group.memberIds);
+    if (JSON.stringify(mappedMembers) !== JSON.stringify(group.memberIds || [])) {
+      group.memberIds = mappedMembers;
+      group.updatedAt = nowIso();
+      changed = true;
+    }
+  });
+
+  (targetDb.meetings || []).forEach(meeting => {
+    if (!meeting) return;
+    let meetingChanged = false;
+    const mappedPerson = meeting.oneToOnePersonId ? remapId(meeting.oneToOnePersonId) : meeting.oneToOnePersonId;
+    if (mappedPerson !== meeting.oneToOnePersonId) {
+      meeting.oneToOnePersonId = mappedPerson;
+      meetingChanged = true;
+    }
+    if (meetingChanged) {
+      meeting.updatedAt = nowIso();
+      changed = true;
+    }
+  });
+
+  return changed;
+}
+
+/**
+ * Applies entity id remaps across collections that reference topics, meetings, templates, or groups.
+ * @param {object} targetDb Database instance to update.
+ * @param {object} maps Map bundle keyed by entity type.
+ * @returns {boolean} Whether any updates were applied.
+ */
+function remapEntityReferences(targetDb, maps) {
+  if (!targetDb) return false;
+  let changed = false;
+
+  const remapId = (map, value) => (map && value ? (map.get(value) || value) : value);
+
+  (targetDb.meetings || []).forEach(meeting => {
+    if (!meeting) return;
+    let meetingChanged = false;
+    const mappedTopic = remapId(maps.topics, meeting.topicId);
+    const mappedTemplate = remapId(maps.templates, meeting.templateId);
+    const mappedGroup = remapId(maps.groups, meeting.oneToOneGroupId);
+    if (mappedTopic !== meeting.topicId) {
+      meeting.topicId = mappedTopic;
+      meetingChanged = true;
+    }
+    if (mappedTemplate !== meeting.templateId) {
+      meeting.templateId = mappedTemplate;
+      meetingChanged = true;
+    }
+    if (mappedGroup !== meeting.oneToOneGroupId) {
+      meeting.oneToOneGroupId = mappedGroup;
+      meetingChanged = true;
+    }
+    if (meetingChanged) {
+      meeting.updatedAt = nowIso();
+      changed = true;
+    }
+  });
+
+  (targetDb.items || []).forEach(item => {
+    if (!item) return;
+    let itemChanged = false;
+    const mappedTopic = remapId(maps.topics, item.topicId);
+    const mappedMeeting = remapId(maps.meetings, item.meetingId);
+    if (mappedTopic !== item.topicId) {
+      item.topicId = mappedTopic;
+      itemChanged = true;
+    }
+    if (mappedMeeting !== item.meetingId) {
+      item.meetingId = mappedMeeting;
+      itemChanged = true;
+    }
+    if (itemChanged) {
+      item.updatedAt = nowIso();
+      changed = true;
+    }
+  });
+
+  (targetDb.tasks || []).forEach(task => {
+    if (!task) return;
+    let taskChanged = false;
+    const mappedTopic = remapId(maps.topics, task.topicId);
+    const mappedMeeting = remapId(maps.meetings, task.meetingId);
+    if (mappedTopic !== task.topicId) {
+      task.topicId = mappedTopic;
+      taskChanged = true;
+    }
+    if (mappedMeeting !== task.meetingId) {
+      task.meetingId = mappedMeeting;
+      taskChanged = true;
+    }
+    if (taskChanged) {
+      task.updatedAt = nowIso();
+      changed = true;
+    }
+  });
+
+  return changed;
+}
+
+/**
+ * Dedupe merged entities and remap references to guarantee unique records.
+ * @param {object} targetDb Database instance to sanitize.
+ * @returns {boolean} Whether any updates were applied.
+ */
+function normalizeDuplicateEntities(targetDb) {
+  if (!targetDb) return false;
+  let changed = false;
+  const ignoreKeys = ["id", "updatedAt", "createdAt", "deleted"];
+
+  const defaultResult = enforceSingleDefaultPerson(targetDb.people || []);
+  if (defaultResult.changed) {
+    targetDb.people = defaultResult.people;
+    changed = true;
+  }
+
+  const peopleDeduped = dedupeCollectionBySignature(targetDb.people || [], { ignoreKeys });
+  if (peopleDeduped.changed) {
+    targetDb.people = peopleDeduped.records;
+    changed = true;
+  }
+
+  const groupDeduped = dedupeCollectionBySignature(targetDb.groups || [], { ignoreKeys });
+  if (groupDeduped.changed) {
+    targetDb.groups = groupDeduped.records;
+    changed = true;
+  }
+
+  const topicDeduped = dedupeCollectionBySignature(targetDb.topics || [], { ignoreKeys });
+  if (topicDeduped.changed) {
+    targetDb.topics = topicDeduped.records;
+    changed = true;
+  }
+
+  const templateDeduped = dedupeCollectionBySignature(targetDb.templates || [], { ignoreKeys });
+  if (templateDeduped.changed) {
+    targetDb.templates = templateDeduped.records;
+    changed = true;
+  }
+
+  const meetingDeduped = dedupeCollectionBySignature(targetDb.meetings || [], { ignoreKeys });
+  if (meetingDeduped.changed) {
+    targetDb.meetings = meetingDeduped.records;
+    changed = true;
+  }
+
+  const itemDeduped = dedupeCollectionBySignature(targetDb.items || [], { ignoreKeys });
+  if (itemDeduped.changed) {
+    targetDb.items = itemDeduped.records;
+    changed = true;
+  }
+
+  const taskDeduped = dedupeCollectionBySignature(targetDb.tasks || [], { ignoreKeys });
+  if (taskDeduped.changed) {
+    targetDb.tasks = taskDeduped.records;
+    changed = true;
+  }
+
+  const personMap = new Map([
+    ...defaultResult.idMap.entries(),
+    ...peopleDeduped.idMap.entries(),
+  ]);
+  if (remapPersonReferences(targetDb, personMap)) {
+    changed = true;
+  }
+
+  if (remapEntityReferences(targetDb, {
+    topics: topicDeduped.idMap,
+    templates: templateDeduped.idMap,
+    meetings: meetingDeduped.idMap,
+    groups: groupDeduped.idMap,
+  })) {
+    changed = true;
+  }
+
+  return changed;
+}
+
 function normalizeBuiltinTemplates(store) {
   if (!store) return false;
   const builtinTemplates = createBuiltinTemplates();
@@ -1098,6 +1519,10 @@ function mergeDb(localDb, remoteDb) {
     items: mergeCollections(l.items || [], r.items || []),
     tasks: mergeCollections(l.tasks || [], r.tasks || []),
   };
+
+  if (normalizeDuplicateEntities(merged)) {
+    merged.updatedAt = nowIso();
+  }
 
   if (normalizeBuiltinTemplates(merged)) {
     merged.updatedAt = nowIso();
