@@ -1762,6 +1762,85 @@ function startAutoSyncTimer() {
 }
 
 /**
+ * Deep-clones a database snapshot to avoid mutating the original input.
+ * @param {object} sourceDb Database snapshot to clone.
+ * @returns {object} Cloned database snapshot.
+ */
+function cloneDbSnapshot(sourceDb) {
+  if (!sourceDb) return makeDefaultDb();
+  if (typeof structuredClone === "function") {
+    return structuredClone(sourceDb);
+  }
+  return JSON.parse(JSON.stringify(sourceDb));
+}
+
+/**
+ * Safely parses a timestamp value for sync comparison.
+ * @param {string|null|undefined} value Timestamp string.
+ * @returns {number} Milliseconds since epoch (0 when invalid).
+ */
+function parseSyncTimestamp(value) {
+  const parsed = Date.parse(value || 0);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+/**
+ * Selects the winning snapshot for the first-ever sync based on recency.
+ * @param {object} localDb Local database snapshot.
+ * @param {object} remoteDb Remote database snapshot.
+ * @param {string|null} remoteModifiedTime Drive-modified timestamp fallback.
+ * @returns {{ source: "local"|"remote", snapshot: object }} Winner + snapshot.
+ */
+function pickInitialSyncSnapshot(localDb, remoteDb, remoteModifiedTime) {
+  const localTimestamp = parseSyncTimestamp(localDb?.updatedAt);
+  const remoteTimestamp = Math.max(
+    parseSyncTimestamp(remoteDb?.updatedAt),
+    parseSyncTimestamp(remoteModifiedTime)
+  );
+  const useRemote = remoteTimestamp > localTimestamp;
+  return {
+    source: useRemote ? "remote" : "local",
+    snapshot: useRemote ? remoteDb : localDb,
+  };
+}
+
+/**
+ * Normalizes a snapshot after selection to keep schema invariants intact.
+ * @param {object} snapshot Selected snapshot to normalize.
+ * @returns {object} Normalized snapshot ready for persistence.
+ */
+function normalizeSyncSnapshot(snapshot) {
+  const normalized = cloneDbSnapshot(snapshot);
+  let changed = false;
+
+  if (normalizeDuplicateEntities(normalized)) {
+    changed = true;
+  }
+  if (normalizeBuiltinTemplates(normalized)) {
+    changed = true;
+  }
+  if (normalizeSettings(normalized)) {
+    changed = true;
+  }
+  const defaultResult = ensureDefaultPersonInDb(normalized);
+  if (defaultResult.changed) {
+    changed = true;
+  }
+  if (normalizeProjectData(normalized)) {
+    changed = true;
+  }
+  if (normalizeTaskAndActionData(normalized)) {
+    changed = true;
+  }
+
+  if (changed) {
+    normalized.updatedAt = nowIso();
+  }
+
+  return normalized;
+}
+
+/**
  * Runs a sync cycle with optional silent mode for auto-sync.
  * @param {{ silent?: boolean, trigger?: string }} [options] Optional sync controls.
  */
@@ -1792,8 +1871,18 @@ async function syncNow(options = {}) {
     const remote = await downloadDriveJson(fileId);
     await getDriveFileMeta(fileId);
 
-    // Merge
-    const merged = mergeDb(db, remote);
+    // For the very first sync, keep only the most recent snapshot (local or remote).
+    const isInitialSync = !lastSyncAt;
+    let merged = null;
+
+    if (isInitialSync) {
+      const { source, snapshot } = pickInitialSyncSnapshot(db, remote, lastRemoteModifiedTime);
+      merged = normalizeSyncSnapshot(snapshot);
+      console.info("Initial sync snapshot selected.", { source });
+    } else {
+      // Merge once both sides have already been aligned by an initial sync.
+      merged = mergeDb(db, remote);
+    }
 
     // Upload merged
     await uploadDriveJson(fileId, merged);
