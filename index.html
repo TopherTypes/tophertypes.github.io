@@ -32,6 +32,7 @@
     <!-- Main module navigation -->
     <nav class="module-tabs" aria-label="Primary modules">
       <button class="module-tab is-active" data-module="meetings">Meetings</button>
+      <button class="module-tab" data-module="projects">Projects</button>
       <button class="module-tab" data-module="people">People</button>
       <button class="module-tab" data-module="tasks">Tasks</button>
       <button class="module-tab" data-module="settings">Settings</button>
@@ -333,6 +334,62 @@
             <button class="btn btn--ghost" data-lightbox-close="true" type="button">Cancel</button>
           </div>
         </div>
+      </div>
+    </section>
+
+    <!-- People module -->
+    <section class="module-panel" id="module_projects">
+      <div class="module-header">
+        <div>
+          <h2>Projects module</h2>
+          <div class="muted">Centralize project context, timelines, and decisions in one workspace.</div>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div class="card">
+          <div class="row row--space">
+            <h2>Project navigator</h2>
+            <button class="btn btn--primary" id="project_module_new_btn" type="button">New project</button>
+          </div>
+          <div class="formrow">
+            <label>Project</label>
+            <select id="project_select"></select>
+          </div>
+          <div class="muted" id="project_summary">Select a project to see a quick summary.</div>
+        </div>
+
+        <div class="card">
+          <div class="row row--space">
+            <h2>Project details</h2>
+            <div class="row">
+              <button class="btn btn--ghost" id="project_reset_btn" type="button">Reset</button>
+              <button class="btn btn--primary" id="project_save_btn" type="button">Save details</button>
+            </div>
+          </div>
+          <div id="project_details_form"></div>
+          <div class="item__error" id="project_details_error" hidden></div>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div class="card">
+          <h2>Actions timeline</h2>
+          <div class="muted">Track action items in chronological order for this project.</div>
+          <div class="timeline" id="project_actions_timeline"></div>
+        </div>
+
+        <div class="card">
+          <h2>Decision log</h2>
+          <div class="muted">Review decisions captured in meetings.</div>
+          <div class="list" id="project_decision_log"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Meetings</h2>
+        <div class="muted">All meetings tagged to this project.</div>
+        <div class="list" id="project_meetings_list"></div>
       </div>
     </section>
 

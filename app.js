@@ -66,6 +66,10 @@ let personViewId = null;
 let personEditorState = { isNew: false, draft: null, error: "" };
 // Tracks draft state for the person creation lightbox flow.
 let personCreateState = { draft: null, error: "" };
+// Tracks the active project selection in the Projects module.
+let projectViewId = null;
+// Stores draft edits for the active project details panel.
+let projectEditorState = { projectId: null, draft: null, error: "" };
 
 /* ================================
    TASKS MODULE CONFIG
@@ -493,6 +497,38 @@ function validateTaskDraft(draft) {
 }
 
 /**
+ * Creates an editable project draft from a project record.
+ * @param {object} project Project record from the database.
+ * @returns {object} Draft fields for editing.
+ */
+function createProjectDraft(project) {
+  return {
+    name: project?.name || "",
+    ownerId: project?.ownerId || getDefaultPersonId() || "",
+    startDate: project?.startDate || "",
+    endDate: project?.endDate || "",
+  };
+}
+
+/**
+ * Validates a project draft and returns a list of user-facing errors.
+ * @param {object} draft Project draft input.
+ * @returns {string[]} Validation error messages.
+ */
+function validateProjectDraft(draft) {
+  const errs = [];
+  if (!draft.name.trim()) errs.push("Project name is required.");
+  if (draft.startDate && draft.endDate) {
+    const start = new Date(`${draft.startDate}T00:00:00`);
+    const end = new Date(`${draft.endDate}T00:00:00`);
+    if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime()) && start > end) {
+      errs.push("Project end date must be after the start date.");
+    }
+  }
+  return errs;
+}
+
+/**
  * Builds a default update-status map for a set of target person ids.
  * @param {string[]} targetIds Person identifiers to seed in the status map.
  * @param {object} [existingStatus={}] Existing updateStatus map to preserve.
@@ -672,6 +708,37 @@ function formatTime(iso) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
+/**
+ * Determines the most relevant date for an action item timeline entry.
+ * Prefers due dates when available, otherwise falls back to updated timestamps.
+ * @param {object} action Action item record.
+ * @returns {Date} Normalized Date object for sorting.
+ */
+function getActionTimelineDate(action) {
+  if (action?.dueDate) {
+    const due = new Date(`${action.dueDate}T00:00:00`);
+    if (!Number.isNaN(due.getTime())) return due;
+  }
+  const updated = new Date(action?.updatedAt || "");
+  if (!Number.isNaN(updated.getTime())) return updated;
+  return new Date();
+}
+
+/**
+ * Formats the timeline label for an action item.
+ * @param {object} action Action item record.
+ * @returns {string} Human-readable label for the timeline entry.
+ */
+function formatActionTimelineLabel(action) {
+  if (action?.dueDate) {
+    return `Due ${fmtDate(`${action.dueDate}T00:00:00`)}`;
+  }
+  if (action?.updatedAt) {
+    return `Updated ${fmtDate(action.updatedAt)}`;
+  }
+  return "No date";
 }
 
 /* ================================
@@ -1542,6 +1609,10 @@ function mergeDb(localDb, remoteDb) {
     merged.updatedAt = nowIso();
   }
 
+  if (normalizeProjectData(merged)) {
+    merged.updatedAt = nowIso();
+  }
+
   if (normalizeTaskAndActionData(merged)) {
     merged.updatedAt = nowIso();
   }
@@ -1580,6 +1651,11 @@ async function loadLocal() {
   }
 
   if (defaultPersonResult.changed) {
+    markDirty();
+    await saveLocal();
+  }
+
+  if (normalizeProjectData(db)) {
     markDirty();
     await saveLocal();
   }
@@ -1831,6 +1907,63 @@ function getDefaultPersonIdFromDb(targetDb) {
 }
 
 /**
+ * Ensures project records include the latest schema fields and valid owners.
+ * @param {object} targetDb Database instance to normalize.
+ * @returns {boolean} Whether any records were changed.
+ */
+function normalizeProjectData(targetDb) {
+  if (!targetDb) return false;
+  let changed = false;
+  if (!Array.isArray(targetDb.topics)) {
+    targetDb.topics = [];
+    return true;
+  }
+
+  const defaultOwnerId = getDefaultPersonIdFromDb(targetDb);
+  const people = alive(targetDb.people || []);
+
+  alive(targetDb.topics).forEach(topic => {
+    if (!topic) return;
+    let topicChanged = false;
+
+    if (!topic.name) {
+      topic.name = "Untitled project";
+      topicChanged = true;
+    }
+    if (!("ownerId" in topic) || !topic.ownerId) {
+      topic.ownerId = defaultOwnerId || "";
+      topicChanged = true;
+    } else if (!people.some(person => person.id === topic.ownerId)) {
+      topic.ownerId = defaultOwnerId || "";
+      topicChanged = true;
+    }
+    if (!("startDate" in topic)) {
+      topic.startDate = "";
+      topicChanged = true;
+    }
+    if (!("endDate" in topic)) {
+      topic.endDate = "";
+      topicChanged = true;
+    }
+    if (!topic.createdAt) {
+      topic.createdAt = topic.updatedAt || nowIso();
+      topicChanged = true;
+    }
+    if (!topic.updatedAt) {
+      topic.updatedAt = nowIso();
+      topicChanged = true;
+    }
+
+    if (topicChanged) {
+      topic.updatedAt = nowIso();
+      changed = true;
+    }
+  });
+
+  return changed;
+}
+
+/**
  * Ensures tasks and meeting action items share the same schema fields.
  * @param {object} targetDb Database instance to normalize.
  * @returns {boolean} Whether any records were changed.
@@ -1952,7 +2085,16 @@ function getTask(id) {
 function ensureTopic(name) {
   const existing = alive(db.topics).find(t => t.name.toLowerCase() === name.toLowerCase());
   if (existing) return existing.id;
-  const t = { id: uid("topic"), name, updatedAt: nowIso() };
+  const now = nowIso();
+  const t = {
+    id: uid("topic"),
+    name,
+    ownerId: getDefaultPersonId() || "",
+    startDate: "",
+    endDate: "",
+    createdAt: now,
+    updatedAt: now
+  };
   db.topics.push(t);
   return t.id;
 }
@@ -2130,6 +2272,7 @@ function renderTopics() {
   const topicSel = byId("meeting_topic");
   const topicsSel = byId("topics_topic");
   const updatesProjectSel = byId("updates_project");
+  const projectSelect = byId("project_select");
 
   const topics = alive(db.topics).sort((a,b)=>a.name.localeCompare(b.name));
   const opts = topics.map(t => ({ value:t.id, label:t.name }));
@@ -2137,6 +2280,7 @@ function renderTopics() {
   renderSelectOptions(topicSel, opts, { placeholder: topics.length ? null : "No projects yet — add one" });
   renderSelectOptions(topicsSel, opts, { placeholder: topics.length ? "Choose a project…" : "No projects yet" });
   renderSelectOptions(updatesProjectSel, opts, { placeholder: "All projects" });
+  renderSelectOptions(projectSelect, opts, { placeholder: topics.length ? "Choose a project…" : "No projects yet" });
 }
 
 function renderPeopleSelects() {
@@ -3388,6 +3532,218 @@ function renderActionsDashboard() {
   wireItemButtons(list);
 }
 
+/**
+ * Reads the current project details form values from the DOM.
+ * @returns {object} Project draft fields.
+ */
+function readProjectDetailsForm() {
+  return {
+    name: byId("project_name")?.value || "",
+    ownerId: byId("project_owner")?.value || "",
+    startDate: byId("project_start")?.value || "",
+    endDate: byId("project_end")?.value || "",
+  };
+}
+
+/**
+ * Updates the project details error banner based on the latest validation output.
+ * @param {string} message Validation error message to display.
+ */
+function setProjectDetailsError(message) {
+  const errorEl = byId("project_details_error");
+  if (!errorEl) return;
+  if (!message) {
+    errorEl.textContent = "";
+    errorEl.hidden = true;
+    return;
+  }
+  errorEl.textContent = message;
+  errorEl.hidden = false;
+}
+
+/**
+ * Renders the Projects module, including summary, details, timeline, decisions, and meetings.
+ */
+function renderProjectsModule() {
+  const select = byId("project_select");
+  const summary = byId("project_summary");
+  const form = byId("project_details_form");
+  const timeline = byId("project_actions_timeline");
+  const decisions = byId("project_decision_log");
+  const meetingsList = byId("project_meetings_list");
+
+  if (!select || !summary || !form || !timeline || !decisions || !meetingsList) return;
+
+  // Keep the selected project stable as options refresh.
+  if (!projectViewId || !getTopic(projectViewId)) {
+    projectViewId = select.value || "";
+  }
+  if (document.activeElement !== select) {
+    select.value = projectViewId || "";
+  }
+
+  const project = projectViewId ? getTopic(projectViewId) : null;
+  const saveBtn = byId("project_save_btn");
+  const resetBtn = byId("project_reset_btn");
+
+  if (!project) {
+    if (saveBtn) saveBtn.disabled = true;
+    if (resetBtn) resetBtn.disabled = true;
+    summary.textContent = "Choose a project to view details.";
+    form.innerHTML = `<div class="muted">Select a project to edit its details.</div>`;
+    timeline.innerHTML = `<div class="muted">No project selected.</div>`;
+    decisions.innerHTML = `<div class="muted">No project selected.</div>`;
+    meetingsList.innerHTML = `<div class="muted">No project selected.</div>`;
+    setProjectDetailsError("");
+    return;
+  }
+
+  if (projectEditorState.projectId !== project.id || !projectEditorState.draft) {
+    projectEditorState = { projectId: project.id, draft: createProjectDraft(project), error: "" };
+  }
+
+  if (saveBtn) saveBtn.disabled = false;
+  if (resetBtn) resetBtn.disabled = false;
+
+  const owner = project.ownerId ? getPerson(project.ownerId) : null;
+  const summaryBits = [
+    `Owner: ${owner?.name || "Unassigned"}`,
+    project.startDate ? `Start: ${fmtDate(`${project.startDate}T00:00:00`)}` : "Start: Not set",
+    project.endDate ? `End: ${fmtDate(`${project.endDate}T00:00:00`)}` : "End: Not set",
+  ];
+  summary.textContent = summaryBits.join(" • ");
+
+  const draft = projectEditorState.draft;
+  form.innerHTML = `
+    <div class="formrow">
+      <label>Project name ${fieldTag(true)}</label>
+      <input id="project_name" type="text" value="${escapeHtml(draft.name)}" />
+    </div>
+    <div class="formrow">
+      <label>Owner ${fieldTag(true)}</label>
+      <select id="project_owner"></select>
+    </div>
+    <div class="grid2">
+      <div class="formrow">
+        <label>Start date</label>
+        <input id="project_start" type="date" value="${escapeHtml(draft.startDate)}" />
+      </div>
+      <div class="formrow">
+        <label>End date</label>
+        <input id="project_end" type="date" value="${escapeHtml(draft.endDate)}" />
+      </div>
+    </div>
+  `;
+
+  const ownerSelect = byId("project_owner");
+  if (ownerSelect) {
+    const people = alive(db.people).sort((a,b)=>a.name.localeCompare(b.name));
+    renderSelectOptions(
+      ownerSelect,
+      people.map(person => ({ value: person.id, label: person.name })),
+      { placeholder: people.length ? "Choose an owner…" : "No people yet" }
+    );
+    ownerSelect.value = draft.ownerId || "";
+  }
+
+  setProjectDetailsError(projectEditorState.error);
+
+  const syncDraftFromForm = () => {
+    projectEditorState = { ...projectEditorState, draft: readProjectDetailsForm(), error: "" };
+    setProjectDetailsError("");
+  };
+
+  byId("project_name")?.addEventListener("input", syncDraftFromForm);
+  byId("project_owner")?.addEventListener("change", syncDraftFromForm);
+  byId("project_start")?.addEventListener("change", syncDraftFromForm);
+  byId("project_end")?.addEventListener("change", syncDraftFromForm);
+
+  const actionItems = alive(db.items)
+    .filter(it => it.topicId === project.id && it.section === "action")
+    .sort((a, b) => getActionTimelineDate(a) - getActionTimelineDate(b));
+
+  timeline.innerHTML = actionItems.map(action => {
+    const ownerName = action.ownerId ? getPerson(action.ownerId)?.name : "Unassigned";
+    const meeting = action.meetingId ? getMeeting(action.meetingId) : null;
+    const status = action.status || "open";
+    const meetingLabel = meeting
+      ? `${meeting.title || "Meeting"} • ${fmtDateTime(meeting.datetime)}`
+      : "No meeting linked";
+
+    return `
+      <div class="timeline-item">
+        <div class="timeline-item__date">${escapeHtml(formatActionTimelineLabel(action))}</div>
+        <div class="timeline-item__card">
+          <div class="item__top">
+            <div><strong>${escapeHtml(action.text || "Untitled action")}</strong></div>
+            <div class="badges">
+              <span class="badge badge--accent">${escapeHtml(status)}</span>
+              <span class="badge">${escapeHtml(ownerName || "Unassigned")}</span>
+            </div>
+          </div>
+          ${action.notes ? `<div class="item__notes">${escapeHtml(action.notes)}</div>` : ""}
+          <div class="timeline-item__meta">${escapeHtml(meetingLabel)}</div>
+          ${meeting ? `<button class="smallbtn" data-project-open-meeting="${escapeHtml(meeting.id)}">Open meeting</button>` : ""}
+        </div>
+      </div>
+    `;
+  }).join("") || `<div class="muted">No action items yet.</div>`;
+
+  const decisionItems = alive(db.items)
+    .filter(it => it.topicId === project.id && it.section === "decision")
+    .sort((a,b)=>Date.parse(b.updatedAt)-Date.parse(a.updatedAt));
+  decisions.innerHTML = decisionItems.map(it => renderItemCard(it)).join("")
+    || `<div class="muted">No decisions logged yet.</div>`;
+  wireItemButtons(decisions);
+
+  const meetings = alive(db.meetings)
+    .filter(m => m.topicId === project.id)
+    .sort((a,b)=>Date.parse(b.datetime)-Date.parse(a.datetime));
+
+  meetingsList.innerHTML = meetings.map(meeting => `
+    <div class="item">
+      <div class="item__top">
+        <div>
+          <strong>${escapeHtml(meeting.title || "Untitled meeting")}</strong>
+          <div class="muted">${fmtDateTime(meeting.datetime)}</div>
+        </div>
+        <div class="badges">
+          <span class="badge">${escapeHtml(meeting.id)}</span>
+        </div>
+      </div>
+      <div class="item__actions">
+        <button class="smallbtn" data-project-open-meeting="${escapeHtml(meeting.id)}">Open meeting</button>
+      </div>
+    </div>
+  `).join("") || `<div class="muted">No meetings linked to this project yet.</div>`;
+
+  timeline.querySelectorAll("[data-project-open-meeting]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const meetingId = btn.getAttribute("data-project-open-meeting");
+      if (!meetingId) return;
+      currentMeetingId = meetingId;
+      await saveMeta();
+      setActiveModule("meetings");
+      setMeetingModuleTab("meeting");
+      setMeetingView("notes");
+      renderAll();
+    });
+  });
+
+  meetingsList.querySelectorAll("[data-project-open-meeting]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const meetingId = btn.getAttribute("data-project-open-meeting");
+      if (!meetingId) return;
+      currentMeetingId = meetingId;
+      await saveMeta();
+      setActiveModule("meetings");
+      setMeetingModuleTab("meeting");
+      setMeetingView("notes");
+      renderAll();
+    });
+  });
+}
+
 function renderTopicOverview() {
   const topicId = byId("topics_topic").value || "";
   const focus = byId("topics_focus").value || "overview";
@@ -3860,6 +4216,7 @@ function renderAll() {
   renderUpdates();
   renderActionsDashboard();
   renderTopicOverview();
+  renderProjectsModule();
   renderSearch();
   renderQuickSearch();
   renderMeetingCalendar();
@@ -4116,9 +4473,53 @@ async function addTopicFromLightbox() {
   if (meetingTopic) {
     meetingTopic.value = topicId;
   }
+  projectViewId = topicId;
+  projectEditorState = { projectId: topicId, draft: createProjectDraft(getTopic(topicId)), error: "" };
   closeLightbox("topic_lightbox");
   // Auto-sync after a user creates a project.
   requestAutoSync("create-project");
+}
+
+/**
+ * Saves edits from the Projects module into the selected project record.
+ */
+async function saveProjectDetails() {
+  if (!projectViewId) return;
+  const project = getTopic(projectViewId);
+  if (!project) return;
+
+  const draft = readProjectDetailsForm();
+  const errs = validateProjectDraft(draft);
+  if (errs.length) {
+    projectEditorState = { ...projectEditorState, draft, error: errs.join(" ") };
+    setProjectDetailsError(projectEditorState.error);
+    return;
+  }
+
+  project.name = draft.name.trim();
+  project.ownerId = draft.ownerId || "";
+  project.startDate = draft.startDate;
+  project.endDate = draft.endDate;
+  project.updatedAt = nowIso();
+
+  projectEditorState = { projectId: project.id, draft: createProjectDraft(project), error: "" };
+  markDirty();
+  await saveLocal();
+  renderAll();
+  // Auto-sync after a user saves project details.
+  requestAutoSync("save-project");
+}
+
+/**
+ * Resets the project detail form to the last saved state.
+ */
+function resetProjectDetails() {
+  if (!projectViewId) return;
+  const project = getTopic(projectViewId);
+  if (!project) return;
+  projectEditorState = { projectId: project.id, draft: createProjectDraft(project), error: "" };
+  setProjectDetailsError("");
+  renderProjectsModule();
 }
 
 /**
@@ -4651,6 +5052,24 @@ function wireTopicControls() {
   byId("topics_focus").addEventListener("change", renderTopicOverview);
 }
 
+/**
+ * Wires the Projects module controls for selection and editing.
+ */
+function wireProjectControls() {
+  const projectSelect = byId("project_select");
+  projectSelect?.addEventListener("change", () => {
+    projectViewId = projectSelect.value || "";
+    projectEditorState = projectViewId
+      ? { projectId: projectViewId, draft: createProjectDraft(getTopic(projectViewId)), error: "" }
+      : { projectId: null, draft: null, error: "" };
+    renderProjectsModule();
+  });
+
+  byId("project_module_new_btn")?.addEventListener("click", openTopicLightbox);
+  byId("project_save_btn")?.addEventListener("click", saveProjectDetails);
+  byId("project_reset_btn")?.addEventListener("click", resetProjectDetails);
+}
+
 function wireSearchControls() {
   byId("search_query").addEventListener("input", debounce(renderSearch, 150));
   byId("search_type").addEventListener("change", renderSearch);
@@ -4772,6 +5191,7 @@ async function init() {
   wireUpdatesControls();
   wireActionsControls();
   wireTopicControls();
+  wireProjectControls();
   wireSearchControls();
   wireGroupControls();
   wireSettingsControls();
