@@ -72,6 +72,28 @@
 
         <!-- Meeting scheduling view -->
         <div class="meeting-view is-active" data-meeting-view-panel="setup" id="meeting_view_setup" role="tabpanel">
+          <div class="card meeting-calendar">
+            <div class="calendar-header">
+              <div>
+                <h2>Meeting calendar</h2>
+                <div class="muted">Scan every scheduled meeting and use the Edit/Notes buttons to jump into the right workflow.</div>
+              </div>
+              <div class="calendar-controls">
+                <div class="segmented" role="tablist" aria-label="Calendar view">
+                  <button class="segmented__btn is-active" type="button" data-calendar-view="week">Week</button>
+                  <button class="segmented__btn" type="button" data-calendar-view="month">Month</button>
+                </div>
+                <div class="calendar-nav">
+                  <button class="btn btn--ghost" type="button" data-calendar-nav="prev">◀</button>
+                  <button class="btn btn--ghost" type="button" data-calendar-nav="today">Today</button>
+                  <button class="btn btn--ghost" type="button" data-calendar-nav="next">▶</button>
+                </div>
+              </div>
+            </div>
+            <div class="calendar-range muted" id="calendar_range"></div>
+            <div id="meeting_calendar"></div>
+          </div>
+
           <div class="grid2">
             <div class="card">
               <h2>Create meeting</h2>
@@ -103,28 +125,6 @@
               </div>
               <div id="quick_search_results" class="list"></div>
             </div>
-          </div>
-
-          <div class="card meeting-calendar">
-            <div class="calendar-header">
-              <div>
-                <h2>Meeting calendar</h2>
-                <div class="muted">Scan every scheduled meeting and use the Edit/Notes buttons to jump into the right workflow.</div>
-              </div>
-              <div class="calendar-controls">
-                <div class="segmented" role="tablist" aria-label="Calendar view">
-                  <button class="segmented__btn is-active" type="button" data-calendar-view="week">Week</button>
-                  <button class="segmented__btn" type="button" data-calendar-view="month">Month</button>
-                </div>
-                <div class="calendar-nav">
-                  <button class="btn btn--ghost" type="button" data-calendar-nav="prev">◀</button>
-                  <button class="btn btn--ghost" type="button" data-calendar-nav="today">Today</button>
-                  <button class="btn btn--ghost" type="button" data-calendar-nav="next">▶</button>
-                </div>
-              </div>
-            </div>
-            <div class="calendar-range muted" id="calendar_range"></div>
-            <div id="meeting_calendar"></div>
           </div>
         </div>
 
@@ -639,6 +639,10 @@
       <div class="formrow">
         <label>Project name</label>
         <input id="topic_name_input" type="text" placeholder="e.g., Q4 planning" />
+      </div>
+      <div class="formrow">
+        <label>Project color</label>
+        <input id="topic_color_input" type="color" />
       </div>
       <div class="item__error" id="topic_lightbox_error" hidden></div>
       <div class="row row--space">
