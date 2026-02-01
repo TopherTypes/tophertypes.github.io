@@ -23,6 +23,8 @@ const STANDARD_TEMPLATE_ID = "tpl_standard";
 const ONE_TO_ONE_TEMPLATE_ID = "tpl_1on1";
 // Canonical name for the built-in default person entity.
 const DEFAULT_PERSON_NAME = "Me";
+// Default project color used when none is provided.
+const DEFAULT_PROJECT_COLOR = "#7c9bff";
 
 // IndexedDB schema identifiers.
 const IDB_NAME = "meeting-notes-db";
@@ -507,6 +509,7 @@ function createProjectDraft(project) {
     ownerId: project?.ownerId || getDefaultPersonId() || "",
     startDate: project?.startDate || "",
     endDate: project?.endDate || "",
+    color: project?.color || DEFAULT_PROJECT_COLOR,
   };
 }
 
@@ -526,6 +529,62 @@ function validateProjectDraft(draft) {
     }
   }
   return errs;
+}
+
+/**
+ * Normalizes a hex color string for project styling.
+ * @param {string} value Raw color string from user input.
+ * @param {string} fallback Fallback color value if invalid.
+ * @returns {string} Sanitized hex color string.
+ */
+function normalizeHexColor(value, fallback = DEFAULT_PROJECT_COLOR) {
+  const trimmed = (value || "").trim();
+  if (!trimmed) return fallback;
+  const hex = trimmed.startsWith("#") ? trimmed : `#${trimmed}`;
+  if (/^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test(hex)) {
+    return hex.toLowerCase();
+  }
+  return fallback;
+}
+
+/**
+ * Converts a hex color string into an RGB tuple.
+ * @param {string} hex Hex color string.
+ * @returns {{r:number,g:number,b:number}|null} RGB values or null when invalid.
+ */
+function hexToRgb(hex) {
+  const normalized = normalizeHexColor(hex);
+  const shorthand = normalized.length === 4;
+  const value = normalized.replace("#", "");
+  const fullValue = shorthand
+    ? value.split("").map(ch => ch + ch).join("")
+    : value;
+  const intVal = Number.parseInt(fullValue, 16);
+  if (Number.isNaN(intVal)) return null;
+  return {
+    r: (intVal >> 16) & 255,
+    g: (intVal >> 8) & 255,
+    b: intVal & 255,
+  };
+}
+
+/**
+ * Builds RGBA variants of a project color for calendar styling.
+ * @param {string} hex Hex color string.
+ * @returns {{border:string, background:string}} RGBA colors for UI surfaces.
+ */
+function buildProjectColorPalette(hex) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) {
+    return {
+      border: "rgba(124,155,255,0.35)",
+      background: "rgba(124,155,255,0.16)",
+    };
+  }
+  return {
+    border: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.5)`,
+    background: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.18)`,
+  };
 }
 
 /**
@@ -2034,6 +2093,10 @@ function normalizeProjectData(targetDb) {
       topic.endDate = "";
       topicChanged = true;
     }
+    if (!("color" in topic) || !topic.color) {
+      topic.color = DEFAULT_PROJECT_COLOR;
+      topicChanged = true;
+    }
     if (!topic.createdAt) {
       topic.createdAt = topic.updatedAt || nowIso();
       topicChanged = true;
@@ -2181,6 +2244,7 @@ function ensureTopic(name) {
     ownerId: getDefaultPersonId() || "",
     startDate: "",
     endDate: "",
+    color: DEFAULT_PROJECT_COLOR,
     createdAt: now,
     updatedAt: now
   };
@@ -3421,17 +3485,21 @@ function renderQuickSearch() {
 }
 
 /**
- * Builds a concise calendar summary line for a meeting.
+ * Builds the calendar metadata lines for a meeting card.
  * @param {object} meeting Meeting record for the calendar.
- * @returns {string} Summary string with project, time, and 1:1 counterpart when applicable.
+ * @returns {string[]} Metadata lines with project, time, and 1:1 counterpart when applicable.
  */
-function buildCalendarMeetingMeta(meeting) {
+function buildCalendarMeetingMetaLines(meeting) {
   const topic = getTopic(meeting.topicId)?.name || "No project";
   const time = formatTime(meeting.datetime) || "Time TBD";
   const template = getTemplate(meeting.templateId);
   const oneToOneContext = template?.id === ONE_TO_ONE_TEMPLATE_ID ? getOneToOneContext(meeting) : null;
   const counterpartLabel = oneToOneContext ? `1:1 with ${oneToOneContext.label}` : "";
-  return [topic, time, counterpartLabel].filter(Boolean).join(" • ");
+  return [
+    `Project: ${topic}`,
+    `Time: ${time}`,
+    counterpartLabel,
+  ].filter(Boolean);
 }
 
 function renderMeetingCalendar() {
@@ -3472,11 +3540,13 @@ function renderMeetingCalendar() {
     const items = meetingsByDay.get(key) || [];
     const list = items.map(m => {
       const title = m.title || "Untitled meeting";
-      const meta = buildCalendarMeetingMeta(m);
+      const metaLines = buildCalendarMeetingMetaLines(m);
+      const projectColor = normalizeHexColor(getTopic(m.topicId)?.color || DEFAULT_PROJECT_COLOR);
+      const palette = buildProjectColorPalette(projectColor);
       return `
-        <div class="calendar-meeting">
+        <div class="calendar-meeting" style="--project-color:${escapeHtml(projectColor)}; --project-color-border:${escapeHtml(palette.border)}; --project-color-bg:${escapeHtml(palette.background)};">
           <div class="calendar-meeting__title">${escapeHtml(title)}</div>
-          <div class="calendar-meeting__meta">${escapeHtml(meta)}</div>
+          ${metaLines.map(line => `<div class="calendar-meeting__meta-line">${escapeHtml(line)}</div>`).join("")}
           <div class="calendar-meeting__actions">
             <button class="smallbtn" type="button" data-meeting-edit="${escapeHtml(m.id)}">Edit</button>
             <button class="smallbtn smallbtn--primary" type="button" data-meeting-notes="${escapeHtml(m.id)}">Notes</button>
@@ -3631,6 +3701,7 @@ function readProjectDetailsForm() {
     ownerId: byId("project_owner")?.value || "",
     startDate: byId("project_start")?.value || "",
     endDate: byId("project_end")?.value || "",
+    color: byId("project_color")?.value || DEFAULT_PROJECT_COLOR,
   };
 }
 
@@ -3714,6 +3785,10 @@ function renderProjectsModule() {
     </div>
     <div class="grid2">
       <div class="formrow">
+        <label>Project color</label>
+        <input id="project_color" type="color" value="${escapeHtml(draft.color || DEFAULT_PROJECT_COLOR)}" />
+      </div>
+      <div class="formrow">
         <label>Start date</label>
         <input id="project_start" type="date" value="${escapeHtml(draft.startDate)}" />
       </div>
@@ -3744,6 +3819,7 @@ function renderProjectsModule() {
 
   byId("project_name")?.addEventListener("input", syncDraftFromForm);
   byId("project_owner")?.addEventListener("change", syncDraftFromForm);
+  byId("project_color")?.addEventListener("input", syncDraftFromForm);
   byId("project_start")?.addEventListener("change", syncDraftFromForm);
   byId("project_end")?.addEventListener("change", syncDraftFromForm);
 
@@ -4323,6 +4399,8 @@ function renderAll() {
 function syncMeetingOneToOneFields() {
   const templateSelect = byId("meeting_template");
   const container = byId("meeting_one_to_one_fields");
+  const topicSelect = byId("meeting_topic");
+  const addProjectBtn = byId("add_topic_btn");
   if (!templateSelect || !container) return;
   const isOneToOne = templateSelect.value === ONE_TO_ONE_TEMPLATE_ID;
   container.hidden = !isOneToOne;
@@ -4339,6 +4417,16 @@ function syncMeetingOneToOneFields() {
   if (!isOneToOne) {
     if (personSelect) personSelect.value = "";
     if (groupSelect) groupSelect.value = "";
+  }
+  if (topicSelect) {
+    // Enforce the 1:1 rule: project selection is cleared and locked.
+    if (isOneToOne) {
+      topicSelect.value = "";
+    }
+    topicSelect.disabled = isOneToOne;
+  }
+  if (addProjectBtn) {
+    addProjectBtn.disabled = isOneToOne;
   }
 }
 
@@ -4431,7 +4519,7 @@ function populateMeetingForm(meeting) {
   const isOneToOneTemplate = meeting.templateId === ONE_TO_ONE_TEMPLATE_ID;
 
   if (templateSelect) templateSelect.value = meeting.templateId || "";
-  if (topicSelect) topicSelect.value = meeting.topicId || "";
+  if (topicSelect) topicSelect.value = isOneToOneTemplate ? "" : (meeting.topicId || "");
   if (titleInput) titleInput.value = meeting.title || "";
   if (datetimeInput) datetimeInput.value = toLocalDateTimeValue(meeting.datetime);
   if (personSelect) personSelect.value = isOneToOneTemplate ? (meeting.oneToOnePersonId || "") : "";
@@ -4457,7 +4545,9 @@ function openMeetingEditLightbox(meetingId) {
  */
 function openTopicLightbox() {
   const input = byId("topic_name_input");
+  const colorInput = byId("topic_color_input");
   if (input) input.value = "";
+  if (colorInput) colorInput.value = DEFAULT_PROJECT_COLOR;
   setLightboxError("topic_lightbox_error", "");
   openLightbox("topic_lightbox", "topic_name_input");
 }
@@ -4549,12 +4639,18 @@ function clearTaskForm() {
  */
 async function addTopicFromLightbox() {
   const name = byId("topic_name_input")?.value.trim() || "";
+  const colorInput = byId("topic_color_input")?.value || "";
   if (!name) {
     setLightboxError("topic_lightbox_error", "Project name is required.");
     return;
   }
 
   const topicId = ensureTopic(name);
+  const topic = getTopic(topicId);
+  if (topic) {
+    topic.color = normalizeHexColor(colorInput);
+    topic.updatedAt = nowIso();
+  }
   markDirty();
   await saveLocal();
   renderAll();
@@ -4589,6 +4685,7 @@ async function saveProjectDetails() {
   project.ownerId = draft.ownerId || "";
   project.startDate = draft.startDate;
   project.endDate = draft.endDate;
+  project.color = normalizeHexColor(draft.color);
   project.updatedAt = nowIso();
 
   projectEditorState = { projectId: project.id, draft: createProjectDraft(project), error: "" };
@@ -4724,7 +4821,7 @@ async function saveMeetingFromLightbox() {
   const isOneToOneTemplate = templateId === ONE_TO_ONE_TEMPLATE_ID;
 
   if (!templateId) { alert("Choose a template."); return; }
-  if (!topicId) { alert("Choose or add a project."); return; }
+  if (!isOneToOneTemplate && !topicId) { alert("Choose or add a project."); return; }
   if (isOneToOneTemplate) {
     if (!oneToOnePersonId && !oneToOneGroupId) {
       alert("Select a person or group for the 1:1 meeting.");
@@ -4750,7 +4847,7 @@ async function saveMeetingFromLightbox() {
       return;
     }
     meeting.templateId = templateId;
-    meeting.topicId = topicId;
+    meeting.topicId = isOneToOneTemplate ? null : topicId;
     meeting.title = title;
     meeting.datetime = datetime;
     meeting.oneToOnePersonId = isOneToOneTemplate ? (oneToOnePersonId || null) : null;
@@ -4760,7 +4857,7 @@ async function saveMeetingFromLightbox() {
     meeting = {
       id: uid("meeting"),
       templateId,
-      topicId,
+      topicId: isOneToOneTemplate ? null : topicId,
       title,
       datetime,
       oneToOnePersonId: isOneToOneTemplate ? (oneToOnePersonId || null) : null,
@@ -4772,7 +4869,12 @@ async function saveMeetingFromLightbox() {
   }
 
   currentMeetingId = meeting.id;
-  setMeetingView("notes");
+  if (meetingEditId) {
+    // When saving edits, return to the schedule view instead of jumping to notes.
+    setMeetingView("setup");
+  } else {
+    setMeetingView("notes");
+  }
   meetingEditId = null;
   clearMeetingForm();
   closeLightbox("meeting_lightbox");
