@@ -691,6 +691,9 @@ label{
   position:relative;
   z-index:1;
   width:min(560px, 92vw);
+  /* Keep lightbox content scrollable so action buttons remain reachable on short viewports. */
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
   border-radius:18px;
   border:1px solid var(--border);
   background: var(--surface-glass);
