@@ -46,6 +46,8 @@ let actionsFilters = { ownerId: null, topicId: "", status: "" };
 let meetingCalendarView = "week";
 let meetingCalendarAnchor = new Date();
 let meetingView = "setup";
+// Tracks if the Notes view has been opened from the calendar view.
+let meetingNotesEnabled = false;
 // Tracks the meeting currently being edited in the lightbox, if any.
 let meetingEditId = null;
 // Tracks top-level module selection for the modular UI shell.
@@ -2364,7 +2366,15 @@ function setMeetingModuleTab(name) {
 }
 
 function setMeetingView(view) {
+  if (view === "notes" && !meetingNotesEnabled) {
+    alert("Select a meeting from the calendar to open notes.");
+    return;
+  }
   meetingView = view;
+  if (view === "setup") {
+    // Reset the notes gate when returning to the schedule view.
+    meetingNotesEnabled = false;
+  }
   document.querySelectorAll("[data-meeting-view]").forEach(btn => {
     const isActive = btn.getAttribute("data-meeting-view") === view;
     btn.classList.toggle("is-active", isActive);
@@ -2426,6 +2436,7 @@ function renderTopics() {
   const topicsSel = byId("topics_topic");
   const updatesProjectSel = byId("updates_project");
   const projectSelect = byId("project_select");
+  const updateTopicSelect = byId("update_topic");
 
   const topics = alive(db.topics).sort((a,b)=>a.name.localeCompare(b.name));
   const opts = topics.map(t => ({ value:t.id, label:t.name }));
@@ -2434,6 +2445,7 @@ function renderTopics() {
   renderSelectOptions(topicsSel, opts, { placeholder: topics.length ? "Choose a project…" : "No projects yet" });
   renderSelectOptions(updatesProjectSel, opts, { placeholder: "All projects" });
   renderSelectOptions(projectSelect, opts, { placeholder: topics.length ? "Choose a project…" : "No projects yet" });
+  renderSelectOptions(updateTopicSelect, opts, { placeholder: topics.length ? "No project" : "No projects yet" });
 }
 
 function renderPeopleSelects() {
@@ -2449,6 +2461,33 @@ function renderPeopleSelects() {
 function renderTaskLightboxOptions() {
   const ownerSelect = byId("task_owner");
   const targetsList = byId("task_targets_list");
+  if (!ownerSelect && !targetsList) return;
+
+  const people = alive(db.people).sort((a,b)=>a.name.localeCompare(b.name));
+
+  if (ownerSelect) {
+    const currentValue = ownerSelect.value || getDefaultPersonId();
+    renderSelectOptions(
+      ownerSelect,
+      people.map(p => ({ value: p.id, label: p.name })),
+      { placeholder: people.length ? "Unassigned" : "No people yet" }
+    );
+    if (currentValue) {
+      ownerSelect.value = currentValue;
+    }
+  }
+
+  if (targetsList) {
+    targetsList.innerHTML = people.map(p => `<option value="${escapeHtml(p.name)}"></option>`).join("");
+  }
+}
+
+/**
+ * Populates the ad-hoc update lightbox selectors and target list.
+ */
+function renderUpdateLightboxOptions() {
+  const ownerSelect = byId("update_owner");
+  const targetsList = byId("update_targets_list");
   if (!ownerSelect && !targetsList) return;
 
   const people = alive(db.people).sort((a,b)=>a.name.localeCompare(b.name));
@@ -3430,7 +3469,9 @@ function wireItemButtons(rootEl) {
       if (!m) return;
       currentMeetingId = mid;
       await saveMeta();
-      setMeetingView("notes");
+      // Keep the user in the schedule view when opening from outside the calendar.
+      meetingNotesEnabled = false;
+      setMeetingView("setup");
       setActiveModule("meetings");
       setMeetingModuleTab("meeting");
       renderAll();
@@ -3444,6 +3485,8 @@ function wireItemButtons(rootEl) {
       if (!m) return;
       currentMeetingId = mid;
       await saveMeta();
+      // Notes access is intentionally unlocked only from the calendar view.
+      meetingNotesEnabled = true;
       setMeetingView("notes");
       setActiveModule("meetings");
       setMeetingModuleTab("meeting");
@@ -3890,7 +3933,9 @@ function renderProjectsModule() {
       await saveMeta();
       setActiveModule("meetings");
       setMeetingModuleTab("meeting");
-      setMeetingView("notes");
+      // Keep notes gated to calendar navigation.
+      meetingNotesEnabled = false;
+      setMeetingView("setup");
       renderAll();
     });
   });
@@ -3903,7 +3948,9 @@ function renderProjectsModule() {
       await saveMeta();
       setActiveModule("meetings");
       setMeetingModuleTab("meeting");
-      setMeetingView("notes");
+      // Keep notes gated to calendar navigation.
+      meetingNotesEnabled = false;
+      setMeetingView("setup");
       renderAll();
     });
   });
@@ -4349,7 +4396,9 @@ function wireTaskList(container) {
       if (!meeting) return;
       currentMeetingId = meetingId;
       await saveMeta();
-      setMeetingView("notes");
+      // Keep notes gated to calendar navigation.
+      meetingNotesEnabled = false;
+      setMeetingView("setup");
       setActiveModule("meetings");
       setMeetingModuleTab("meeting");
       renderAll();
@@ -4370,6 +4419,7 @@ function renderAll() {
   renderTopics();
   renderPeopleSelects();
   renderTaskLightboxOptions();
+  renderUpdateLightboxOptions();
   renderMeetingCounterpartSelects();
   renderPeopleManager();
   renderGroups();
@@ -4635,6 +4685,59 @@ function clearTaskForm() {
 }
 
 /**
+ * Reads the ad-hoc update lightbox inputs into a draft object.
+ * @returns {object} Update draft from the form.
+ */
+function readUpdateFormDraft() {
+  return {
+    title: byId("update_title")?.value || "",
+    notes: byId("update_notes")?.value || "",
+    ownerId: byId("update_owner")?.value || "",
+    topicId: byId("update_topic")?.value || "",
+    status: byId("update_status")?.value || "",
+    priority: byId("update_priority")?.value || "medium",
+    dueDate: byId("update_due")?.value || "",
+    link: byId("update_link")?.value?.trim() || "",
+    updateTargetsRaw: byId("update_targets")?.value || "",
+  };
+}
+
+/**
+ * Clears the ad-hoc update lightbox inputs to their defaults.
+ */
+function clearUpdateForm() {
+  const titleInput = byId("update_title");
+  const notesInput = byId("update_notes");
+  const ownerSelect = byId("update_owner");
+  const topicSelect = byId("update_topic");
+  const statusSelect = byId("update_status");
+  const prioritySelect = byId("update_priority");
+  const dueInput = byId("update_due");
+  const linkInput = byId("update_link");
+  const targetsInput = byId("update_targets");
+
+  if (titleInput) titleInput.value = "";
+  if (notesInput) notesInput.value = "";
+  if (ownerSelect) ownerSelect.value = getDefaultPersonId() || "";
+  if (topicSelect) topicSelect.value = "";
+  if (statusSelect) statusSelect.value = "";
+  if (prioritySelect) prioritySelect.value = "medium";
+  if (dueInput) dueInput.value = "";
+  if (linkInput) linkInput.value = "";
+  if (targetsInput) targetsInput.value = "";
+  setLightboxError("update_lightbox_error", "");
+}
+
+/**
+ * Opens the ad-hoc update lightbox with fresh options and defaults.
+ */
+function openUpdateLightbox() {
+  renderUpdateLightboxOptions();
+  clearUpdateForm();
+  openLightbox("update_lightbox", "update_title");
+}
+
+/**
  * Reads the project creation input, validates, and persists a new project.
  */
 async function addTopicFromLightbox() {
@@ -4813,6 +4916,59 @@ async function addTask() {
   requestAutoSync("create-task");
 }
 
+/**
+ * Adds an ad-hoc update (not tied to a meeting) into the items collection.
+ */
+async function addAdHocUpdate() {
+  const draft = readUpdateFormDraft();
+  const errs = [];
+
+  if (!draft.title.trim()) errs.push("Update summary is required.");
+
+  const { ids: updateTargets, missing } = parseTargetNames(draft.updateTargetsRaw, alive(db.people));
+  if (missing.length) {
+    errs.push(`Unknown people: ${missing.join(", ")}.`);
+  }
+  if (!updateTargets.length) {
+    errs.push("At least one update target is required.");
+  }
+
+  if (errs.length) {
+    setLightboxError("update_lightbox_error", errs.join(" "));
+    return;
+  }
+
+  const now = nowIso();
+  const item = {
+    id: uid("item"),
+    kind: "item",
+    meetingId: null,
+    topicId: draft.topicId || null,
+    section: "update",
+    text: draft.title.trim(),
+    title: draft.title.trim(),
+    notes: draft.notes.trim(),
+    ownerId: draft.ownerId || null,
+    status: draft.status || null,
+    dueDate: draft.dueDate || null,
+    priority: draft.priority || "medium",
+    link: draft.link.trim(),
+    updateTargets,
+    updateStatus: buildUpdateStatusForTargets(updateTargets),
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  db.items.push(item);
+  clearUpdateForm();
+  closeLightbox("update_lightbox");
+  markDirty();
+  await saveLocal();
+  renderAll();
+  // Auto-sync after a user captures an ad-hoc update.
+  requestAutoSync("create-ad-hoc-update");
+}
+
 async function saveMeetingFromLightbox() {
   const templateId = byId("meeting_template").value;
   const topicId = byId("meeting_topic").value || null;
@@ -4869,12 +5025,8 @@ async function saveMeetingFromLightbox() {
   }
 
   currentMeetingId = meeting.id;
-  if (meetingEditId) {
-    // When saving edits, return to the schedule view instead of jumping to notes.
-    setMeetingView("setup");
-  } else {
-    setMeetingView("notes");
-  }
+  // Keep the schedule view active after creating or editing meetings.
+  setMeetingView("setup");
   meetingEditId = null;
   clearMeetingForm();
   closeLightbox("meeting_lightbox");
@@ -5086,7 +5238,7 @@ async function importJsonBackup(file) {
 =================================== */
 
 function wireModules() {
-  document.querySelectorAll(".module-tab").forEach(btn => {
+  document.querySelectorAll(".module-tab[data-module]").forEach(btn => {
     btn.addEventListener("click", () => setActiveModule(btn.dataset.module));
   });
   document.querySelectorAll(".module-subtab").forEach(btn => {
@@ -5112,12 +5264,22 @@ function wireTasksControls() {
 }
 
 /**
+ * Wires the ad-hoc update lightbox controls.
+ */
+function wireUpdateControls() {
+  byId("ad_hoc_update_btn")?.addEventListener("click", openUpdateLightbox);
+  byId("update_add_btn")?.addEventListener("click", addAdHocUpdate);
+  byId("update_clear_btn")?.addEventListener("click", clearUpdateForm);
+}
+
+/**
  * Wires shared lightbox dismissal controls for all modal flows.
  */
 function wireLightboxControls() {
   const lightboxIds = [
     "task_lightbox",
     "meeting_lightbox",
+    "update_lightbox",
     "topic_lightbox",
     "person_lightbox",
     "group_lightbox"
@@ -5388,6 +5550,7 @@ async function init() {
   wireSettingsControls();
   wirePeopleControls();
   wireTasksControls();
+  wireUpdateControls();
   wireLightboxControls();
 
   // buttons disabled until APIs ready
