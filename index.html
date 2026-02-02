@@ -52,6 +52,7 @@
       <nav class="module-subtabs" aria-label="Meeting workspace tabs">
         <button class="module-subtab is-active" data-module-tab="meeting">Meeting</button>
         <button class="module-subtab" data-module-tab="updates">Updates</button>
+        <button class="module-subtab" data-module-tab="update_queue">Update queue</button>
         <button class="module-subtab" data-module-tab="actions">My Actions</button>
         <button class="module-subtab" data-module-tab="topics">Projects</button>
         <button class="module-subtab" data-module-tab="search">Search</button>
@@ -177,6 +178,50 @@
           </div>
 
           <div id="updates_list" class="list"></div>
+        </div>
+      </section>
+
+      <!-- Update queue overview -->
+      <section class="module-section" id="module_tab_update_queue">
+        <div class="card">
+          <h2>Update queue</h2>
+          <div class="muted">Review update items, grouped by update type, and filter by audience or status.</div>
+
+          <div class="filters">
+            <div class="formrow">
+              <label>Person</label>
+              <select id="update_queue_person"></select>
+            </div>
+
+            <div class="formrow">
+              <label>Project</label>
+              <select id="update_queue_project"></select>
+            </div>
+
+            <div class="formrow">
+              <label>Type</label>
+              <select id="update_queue_type">
+                <option value="">All types</option>
+                <option value="update">Update</option>
+                <option value="action">Action</option>
+                <option value="decision">Decision</option>
+                <option value="question">Question</option>
+                <option value="info">Information</option>
+              </select>
+            </div>
+
+            <div class="formrow">
+              <label>Status</label>
+              <select id="update_queue_status">
+                <option value="">All updates</option>
+                <option value="pending" selected>Pending updates</option>
+                <option value="updated">Fully updated</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="muted" id="update_queue_count"></div>
+          <div id="update_queue_list" class="list"></div>
         </div>
       </section>
 
@@ -613,6 +658,16 @@
         </div>
         <div class="grid2">
           <div class="formrow">
+            <label>Update type</label>
+            <select id="update_type">
+              <option value="update" selected>Update</option>
+              <option value="action">Action</option>
+              <option value="decision">Decision</option>
+              <option value="question">Question</option>
+              <option value="info">Information</option>
+            </select>
+          </div>
+          <div class="formrow">
             <label>Status</label>
             <select id="update_status">
               <option value="">— None —</option>
@@ -622,6 +677,8 @@
               <option value="done">Done</option>
             </select>
           </div>
+        </div>
+        <div class="grid2">
           <div class="formrow">
             <label>Priority</label>
             <select id="update_priority">
@@ -630,16 +687,14 @@
               <option value="high">High</option>
             </select>
           </div>
-        </div>
-        <div class="grid2">
           <div class="formrow">
             <label>Due date</label>
             <input id="update_due" type="date" />
           </div>
-          <div class="formrow">
-            <label>Link</label>
-            <input id="update_link" type="url" placeholder="https://…" />
-          </div>
+        </div>
+        <div class="formrow">
+          <label>Link</label>
+          <input id="update_link" type="url" placeholder="https://…" />
         </div>
         <div class="formrow">
           <label>Update targets</label>

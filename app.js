@@ -39,6 +39,16 @@ const PROJECT_COLOR_PRESETS = [
   { label: "Slate", value: "#8aa1c4" },
   { label: "Midnight", value: "#556b9b" },
 ];
+// Update item types used for ad-hoc entries and the updates queue view.
+const UPDATE_TYPE_LABELS = {
+  update: "Update",
+  action: "Action",
+  decision: "Decision",
+  question: "Question",
+  info: "Information",
+};
+// Defines the preferred ordering for update types in grouped lists.
+const UPDATE_TYPE_ORDER = ["update", "action", "decision", "question", "info"];
 
 // IndexedDB schema identifiers.
 const IDB_NAME = "meeting-notes-db";
@@ -70,6 +80,8 @@ let activeModule = "meetings";
 let meetingModuleTab = "meeting";
 // Filters for the Tasks module list view.
 let taskFilters = { status: "", priority: "" };
+// Filters for the updates queue overview.
+let updateQueueFilters = { personId: "", projectId: "", type: "", status: "pending" };
 
 let syncInProgress = false;
 let hasUnsyncedChanges = false;
@@ -595,8 +607,9 @@ function renderProjectColorPicker(containerId, groupName, selectedColor) {
   container.innerHTML = PROJECT_COLOR_PRESETS.map(preset => `
     <label class="color-option">
       <input type="radio" name="${escapeHtml(groupName)}" value="${escapeHtml(preset.value)}" ${preset.value === resolved ? "checked" : ""} />
-      <span class="color-swatch" style="--swatch:${escapeHtml(preset.value)}"></span>
-      <span>${escapeHtml(preset.label)}</span>
+      <span class="color-swatch" style="--swatch:${escapeHtml(preset.value)}">
+        <span class="color-swatch__label">${escapeHtml(preset.label)}</span>
+      </span>
     </label>
   `).join("");
 }
@@ -665,6 +678,39 @@ function buildUpdateStatusForTargets(targetIds, existingStatus = {}) {
     out[pid] = prior ? { updated: !!prior.updated, updatedAt: prior.updatedAt } : { updated: false };
   });
   return out;
+}
+
+/**
+ * Maps an update section key to a friendly display label.
+ * @param {string} type Update type identifier.
+ * @returns {string} Friendly label for UI rendering.
+ */
+function getUpdateTypeLabel(type) {
+  return UPDATE_TYPE_LABELS[type] || type;
+}
+
+/**
+ * Computes update completion state for a specific item and optional person.
+ * @param {object} item Update item.
+ * @param {string} personId Optional person id to scope completion.
+ * @returns {{isUpdated:boolean,isPending:boolean,updatedCount:number,total:number}} Completion details.
+ */
+function getUpdateCompletionState(item, personId = "") {
+  const targets = Array.isArray(item.updateTargets) ? item.updateTargets : [];
+  const updateStatus = item.updateStatus || {};
+
+  if (!targets.length) {
+    return { isUpdated: false, isPending: false, updatedCount: 0, total: 0 };
+  }
+
+  if (personId) {
+    const updated = !!updateStatus[personId]?.updated;
+    return { isUpdated: updated, isPending: !updated, updatedCount: updated ? 1 : 0, total: 1 };
+  }
+
+  const updatedCount = targets.filter(id => updateStatus[id]?.updated).length;
+  const isUpdated = updatedCount === targets.length;
+  return { isUpdated, isPending: !isUpdated, updatedCount, total: targets.length };
 }
 
 /**
@@ -1807,6 +1853,12 @@ async function loadLocal() {
       status: meta.taskFilters?.status || "",
       priority: meta.taskFilters?.priority || "",
     };
+    updateQueueFilters = {
+      personId: meta.updateQueueFilters?.personId || "",
+      projectId: meta.updateQueueFilters?.projectId || "",
+      type: meta.updateQueueFilters?.type || "",
+      status: meta.updateQueueFilters?.status || "pending",
+    };
     if (Number.isNaN(meetingCalendarAnchor.getTime())) {
       meetingCalendarAnchor = new Date();
     }
@@ -1832,7 +1884,8 @@ async function saveMeta() {
     meetingCalendarAnchor: meetingCalendarAnchor?.toISOString?.() || nowIso(),
     activeModule,
     meetingModuleTab,
-    taskFilters
+    taskFilters,
+    updateQueueFilters
   });
   updateAuthUi();
 }
@@ -2525,6 +2578,7 @@ function renderTopics() {
   const updatesProjectSel = byId("updates_project");
   const projectSelect = byId("project_select");
   const updateTopicSelect = byId("update_topic");
+  const updateQueueProjectSel = byId("update_queue_project");
 
   const topics = alive(db.topics).sort((a,b)=>a.name.localeCompare(b.name));
   const opts = topics.map(t => ({ value:t.id, label:t.name }));
@@ -2534,13 +2588,22 @@ function renderTopics() {
   renderSelectOptions(updatesProjectSel, opts, { placeholder: "All projects" });
   renderSelectOptions(projectSelect, opts, { placeholder: topics.length ? "Choose a project…" : "No projects yet" });
   renderSelectOptions(updateTopicSelect, opts, { placeholder: topics.length ? "No project" : "No projects yet" });
+  if (updateQueueProjectSel) {
+    renderSelectOptions(updateQueueProjectSel, opts, { placeholder: "All projects" });
+  }
 }
 
 function renderPeopleSelects() {
   const updatesSel = byId("updates_person");
-  if (!updatesSel) return;
+  const updateQueuePersonSel = byId("update_queue_person");
+  if (!updatesSel && !updateQueuePersonSel) return;
   const people = alive(db.people).sort((a,b)=>a.name.localeCompare(b.name));
-  renderSelectOptions(updatesSel, people.map(p => ({ value:p.id, label:p.name })), { placeholder: people.length ? "Choose a person…" : "No people yet" });
+  if (updatesSel) {
+    renderSelectOptions(updatesSel, people.map(p => ({ value:p.id, label:p.name })), { placeholder: people.length ? "Choose a person…" : "No people yet" });
+  }
+  if (updateQueuePersonSel) {
+    renderSelectOptions(updateQueuePersonSel, people.map(p => ({ value:p.id, label:p.name })), { placeholder: "All people" });
+  }
 }
 
 /**
@@ -3313,7 +3376,7 @@ function renderItemCard(it) {
   const requires = new Set(secDef?.requires || []);
   const ownerRequired = requires.has("ownerId");
   const statusRequired = requires.has("status");
-  const sectionLabel = secDef?.label || it.section;
+  const sectionLabel = secDef?.label || getUpdateTypeLabel(it.section);
 
   const people = alive(db.people).sort((a,b)=>a.name.localeCompare(b.name));
 
@@ -3800,6 +3863,84 @@ function renderUpdates() {
 
   // stash for mark-all operation
   list.dataset.pendingIds = JSON.stringify(pending.map(x => x.id));
+}
+
+/**
+ * Renders the updates queue view grouped by update type with filter controls.
+ */
+function renderUpdateQueue() {
+  const personSel = byId("update_queue_person");
+  const projectSel = byId("update_queue_project");
+  const typeSel = byId("update_queue_type");
+  const statusSel = byId("update_queue_status");
+  const list = byId("update_queue_list");
+  const count = byId("update_queue_count");
+
+  if (!personSel || !projectSel || !typeSel || !statusSel || !list) return;
+
+  if (document.activeElement !== personSel) {
+    personSel.value = updateQueueFilters.personId || "";
+  }
+  if (document.activeElement !== projectSel) {
+    projectSel.value = updateQueueFilters.projectId || "";
+  }
+  if (document.activeElement !== typeSel) {
+    typeSel.value = updateQueueFilters.type || "";
+  }
+  if (document.activeElement !== statusSel) {
+    statusSel.value = updateQueueFilters.status || "pending";
+  }
+
+  const personId = personSel.value || "";
+  const projectId = projectSel.value || "";
+  const typeFilter = typeSel.value || "";
+  const statusFilter = statusSel.value || "";
+
+  const matches = alive(db.items)
+    .filter(it => Array.isArray(it.updateTargets) && it.updateTargets.length)
+    .filter(it => !personId || it.updateTargets.includes(personId))
+    .filter(it => !projectId || it.topicId === projectId)
+    .filter(it => !typeFilter || it.section === typeFilter)
+    .filter(it => {
+      if (!statusFilter) return true;
+      const state = getUpdateCompletionState(it, personId);
+      if (statusFilter === "pending") return state.isPending;
+      if (statusFilter === "updated") return state.isUpdated;
+      return true;
+    })
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+
+  if (count) count.textContent = `${matches.length} update(s)`;
+
+  const grouped = new Map();
+  matches.forEach(it => {
+    const key = it.section || "update";
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(it);
+  });
+
+  const orderedTypes = [
+    ...UPDATE_TYPE_ORDER,
+    ...Array.from(grouped.keys()).filter(key => !UPDATE_TYPE_ORDER.includes(key))
+  ];
+
+  const groupsHtml = orderedTypes
+    .filter(key => grouped.has(key))
+    .map(key => {
+      const items = grouped.get(key) || [];
+      return `
+        <div class="updates-group">
+          <div class="updates-group__title">${escapeHtml(getUpdateTypeLabel(key))} (${items.length})</div>
+          <div class="updates-group__list">
+            ${items.map(it => renderItemCard(it)).join("")}
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+
+  list.innerHTML = groupsHtml || `<div class="muted">No updates match these filters.</div>`;
+  wireItemButtons(list);
 }
 
 function renderActionsDashboard() {
@@ -4624,6 +4765,7 @@ function renderAll() {
 
   // update overview selects might have changed
   renderUpdates();
+  renderUpdateQueue();
   renderActionsDashboard();
   renderTopicOverview();
   renderProjectsModule();
@@ -4906,6 +5048,7 @@ function readUpdateFormDraft() {
     notes: byId("update_notes")?.value || "",
     ownerId: byId("update_owner")?.value || "",
     topicId: byId("update_topic")?.value || "",
+    updateType: byId("update_type")?.value || "update",
     status: byId("update_status")?.value || "",
     priority: byId("update_priority")?.value || "medium",
     dueDate: byId("update_due")?.value || "",
@@ -4922,6 +5065,7 @@ function clearUpdateForm() {
   const notesInput = byId("update_notes");
   const ownerSelect = byId("update_owner");
   const topicSelect = byId("update_topic");
+  const typeSelect = byId("update_type");
   const statusSelect = byId("update_status");
   const prioritySelect = byId("update_priority");
   const dueInput = byId("update_due");
@@ -4932,6 +5076,7 @@ function clearUpdateForm() {
   if (notesInput) notesInput.value = "";
   if (ownerSelect) ownerSelect.value = getDefaultPersonId() || "";
   if (topicSelect) topicSelect.value = "";
+  if (typeSelect) typeSelect.value = "update";
   if (statusSelect) statusSelect.value = "";
   if (prioritySelect) prioritySelect.value = "medium";
   if (dueInput) dueInput.value = "";
@@ -5162,13 +5307,15 @@ async function addAdHocUpdate() {
     return;
   }
 
+  // Ensure ad-hoc updates always store a known update type for grouping.
+  const updateType = UPDATE_TYPE_LABELS[draft.updateType] ? draft.updateType : "update";
   const now = nowIso();
   const item = {
     id: uid("item"),
     kind: "item",
     meetingId: null,
     topicId: draft.topicId || null,
-    section: "update",
+    section: updateType,
     text: draft.title.trim(),
     title: draft.title.trim(),
     notes: draft.notes.trim(),
@@ -5608,6 +5755,23 @@ function wireUpdatesControls() {
   byId("updates_filter").addEventListener("input", debounce(renderUpdates, 150));
   byId("mark_updates_btn").addEventListener("click", markAllShownUpdates);
   byId("copy_updates_btn").addEventListener("click", copyPendingUpdatesText);
+
+  // Keep updates queue filters in sync with persisted view state.
+  const updateQueueFilterHandler = () => {
+    updateQueueFilters = {
+      personId: byId("update_queue_person")?.value || "",
+      projectId: byId("update_queue_project")?.value || "",
+      type: byId("update_queue_type")?.value || "",
+      status: byId("update_queue_status")?.value || "pending",
+    };
+    saveMeta().catch(console.error);
+    renderUpdateQueue();
+  };
+
+  byId("update_queue_person")?.addEventListener("change", updateQueueFilterHandler);
+  byId("update_queue_project")?.addEventListener("change", updateQueueFilterHandler);
+  byId("update_queue_type")?.addEventListener("change", updateQueueFilterHandler);
+  byId("update_queue_status")?.addEventListener("change", updateQueueFilterHandler);
 }
 
 function wireActionsControls() {
