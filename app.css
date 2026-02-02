@@ -450,13 +450,22 @@ label{
 }
 
 .color-swatch{
-  width:16px;
-  height:16px;
-  border-radius:50%;
+  min-width:88px;
+  height:26px;
+  padding:0 12px;
+  border-radius:999px;
   background: var(--swatch, var(--accent));
   border:1px solid rgba(255,255,255,0.3);
   box-shadow: 0 0 0 2px rgba(7,9,15,0.6) inset;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  font-size:11px;
+  font-weight:600;
+  color:#fff;
+  text-shadow:0 1px 2px rgba(0,0,0,0.45);
 }
+.color-swatch__label{letter-spacing:0.2px;}
 
 /* Item cards */
 .item{
@@ -499,6 +508,23 @@ label{
   white-space:pre-wrap;
   color: var(--muted);
   font-size:12px;
+}
+.updates-group{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+.updates-group + .updates-group{margin-top:16px;}
+.updates-group__title{
+  font-size:12px;
+  text-transform:uppercase;
+  letter-spacing:0.12em;
+  color: var(--muted);
+}
+.updates-group__list{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
 }
 .item__meta{margin-top:8px; display:flex; gap:10px; flex-wrap:wrap; color:var(--muted); font-size:12px;}
 .item__actions{margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;}
