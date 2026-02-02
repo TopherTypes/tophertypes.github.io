@@ -80,8 +80,8 @@ let activeModule = "meetings";
 let meetingModuleTab = "meeting";
 // Filters for the Tasks module list view.
 let taskFilters = { status: "", priority: "" };
-// Filters for the updates queue overview.
-let updateQueueFilters = { personId: "", projectId: "", type: "", status: "pending" };
+// Filters for the updates queue overview (defaults to show everything).
+let updateQueueFilters = { personId: "", projectId: "", type: "", status: "" };
 
 let syncInProgress = false;
 let hasUnsyncedChanges = false;
@@ -1857,7 +1857,7 @@ async function loadLocal() {
       personId: meta.updateQueueFilters?.personId || "",
       projectId: meta.updateQueueFilters?.projectId || "",
       type: meta.updateQueueFilters?.type || "",
-      status: meta.updateQueueFilters?.status || "pending",
+      status: meta.updateQueueFilters?.status || "",
     };
     if (Number.isNaN(meetingCalendarAnchor.getTime())) {
       meetingCalendarAnchor = new Date();
@@ -3867,6 +3867,7 @@ function renderUpdates() {
 
 /**
  * Renders the updates queue view grouped by update type with filter controls.
+ * The default filter state intentionally includes all meeting and ad-hoc updates.
  */
 function renderUpdateQueue() {
   const personSel = byId("update_queue_person");
@@ -3888,7 +3889,7 @@ function renderUpdateQueue() {
     typeSel.value = updateQueueFilters.type || "";
   }
   if (document.activeElement !== statusSel) {
-    statusSel.value = updateQueueFilters.status || "pending";
+    statusSel.value = updateQueueFilters.status || "";
   }
 
   const personId = personSel.value || "";
@@ -3897,6 +3898,7 @@ function renderUpdateQueue() {
   const statusFilter = statusSel.value || "";
 
   const matches = alive(db.items)
+    // Include meeting and ad-hoc updates that have update targets.
     .filter(it => Array.isArray(it.updateTargets) && it.updateTargets.length)
     .filter(it => !personId || it.updateTargets.includes(personId))
     .filter(it => !projectId || it.topicId === projectId)
@@ -5762,7 +5764,7 @@ function wireUpdatesControls() {
       personId: byId("update_queue_person")?.value || "",
       projectId: byId("update_queue_project")?.value || "",
       type: byId("update_queue_type")?.value || "",
-      status: byId("update_queue_status")?.value || "pending",
+      status: byId("update_queue_status")?.value || "",
     };
     saveMeta().catch(console.error);
     renderUpdateQueue();
