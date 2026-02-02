@@ -40,7 +40,7 @@ const PROJECT_COLOR_PRESETS = [
   { label: "Midnight", value: "#556b9b" },
 ];
 // Update item types used for ad-hoc entries and the updates queue view.
-const UPDATE_TYPE_LABELS = {
+const DEFAULT_UPDATE_TYPE_LABELS = {
   update: "Update",
   action: "Action",
   decision: "Decision",
@@ -48,7 +48,7 @@ const UPDATE_TYPE_LABELS = {
   info: "Information",
 };
 // Defines the preferred ordering for update types in grouped lists.
-const UPDATE_TYPE_ORDER = ["update", "action", "decision", "question", "info"];
+const DEFAULT_UPDATE_TYPE_ORDER = ["update", "action", "decision", "question", "info"];
 
 // IndexedDB schema identifiers.
 const IDB_NAME = "meeting-notes-db";
@@ -63,6 +63,8 @@ let gapiInited = false;
 let gisInited = false;
 let tokenClient = null;
 let driveReady = false;
+let autoSignInAttempted = false;
+let appReady = false;
 
 let db = null;            // in-memory working DB
 let currentMeetingId = null;
@@ -87,8 +89,6 @@ let syncInProgress = false;
 let hasUnsyncedChanges = false;
 let lastSyncAt = null;
 let lastRemoteModifiedTime = null;
-// Auto-sync cadence (30 seconds) for background refresh.
-const AUTO_SYNC_INTERVAL_MS = 30 * 1000;
 // Holds the interval ID for periodic auto-sync scheduling.
 let autoSyncTimerId = null;
 const itemEditState = new Map();
@@ -109,22 +109,26 @@ let projectDeleteId = null;
    TASKS MODULE CONFIG
 =================================== */
 
-const TASK_STATUS_LABELS = {
+const DEFAULT_TASK_STATUS_LABELS = {
   todo: "To do",
   in_progress: "In progress",
   blocked: "Blocked",
   done: "Done"
 };
 
-const TASK_PRIORITY_LABELS = {
+const DEFAULT_TASK_PRIORITY_LABELS = {
   low: "Low",
   medium: "Medium",
   high: "High"
 };
 
 // Sort weight maps for consistent task ordering.
-const TASK_PRIORITY_ORDER = { high: 0, medium: 1, low: 2 };
-const TASK_STATUS_ORDER = { todo: 0, in_progress: 1, blocked: 2, done: 3 };
+const DEFAULT_TASK_PRIORITY_ORDER = ["high", "medium", "low"];
+const DEFAULT_TASK_STATUS_ORDER = ["todo", "in_progress", "blocked", "done"];
+const DEFAULT_MEETING_CALENDAR_VIEW = "week";
+const DEFAULT_MODULE = "meetings";
+const DEFAULT_THEME_MODE = "dark";
+const DEFAULT_AUTO_SYNC_INTERVAL_SECONDS = 30;
 
 // Status mapping helpers to keep action items and tasks aligned across modules.
 const ACTION_STATUS_TO_TASK_STATUS = {
@@ -250,10 +254,10 @@ function escapeHtml(s){
  * Creates the canonical default person record used across modules.
  * @returns {object} Default person entity with locked fields.
  */
-function createDefaultPersonRecord() {
+function createDefaultPersonRecord(label = DEFAULT_PERSON_NAME) {
   return {
     id: uid("person"),
-    name: DEFAULT_PERSON_NAME,
+    name: label,
     email: "",
     organisation: "",
     jobTitle: "",
@@ -272,9 +276,109 @@ function buildDefaultSettings() {
       frequencyMinutes: 30,
       autoSyncOnLaunch: true,
       autoSyncOnReconnect: true,
+      autoSignInOnLaunch: true,
+      backgroundIntervalSeconds: DEFAULT_AUTO_SYNC_INTERVAL_SECONDS,
+    },
+    ui: {
+      defaultModule: DEFAULT_MODULE,
+      defaultCalendarView: DEFAULT_MEETING_CALENDAR_VIEW,
+      theme: DEFAULT_THEME_MODE,
+    },
+    person: {
+      defaultLabel: DEFAULT_PERSON_NAME,
+    },
+    labels: {
+      updateTypes: { ...DEFAULT_UPDATE_TYPE_LABELS },
+      taskStatuses: { ...DEFAULT_TASK_STATUS_LABELS },
+      taskPriorities: { ...DEFAULT_TASK_PRIORITY_LABELS },
+    },
+    order: {
+      updateTypes: [...DEFAULT_UPDATE_TYPE_ORDER],
+      taskStatuses: [...DEFAULT_TASK_STATUS_ORDER],
+      taskPriorities: [...DEFAULT_TASK_PRIORITY_ORDER],
     },
     updatedAt: nowIso(),
   };
+}
+
+/**
+ * Normalizes a map-like setting to ensure defaults are preserved and values are strings.
+ * @param {object|null|undefined} candidate Raw setting map.
+ * @param {object} defaults Default label map.
+ * @returns {object} Normalized map.
+ */
+function normalizeSettingsMap(candidate, defaults) {
+  const normalized = { ...defaults };
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    return normalized;
+  }
+  Object.entries(candidate).forEach(([key, value]) => {
+    if (typeof key !== "string") return;
+    if (typeof value !== "string") return;
+    const trimmedKey = key.trim();
+    const trimmedValue = value.trim();
+    if (!trimmedKey || !trimmedValue) return;
+    normalized[trimmedKey] = trimmedValue;
+  });
+  return normalized;
+}
+
+/**
+ * Normalizes an ordered list setting, ensuring defaults and known keys are preserved.
+ * @param {string[]|null|undefined} candidate Raw list value.
+ * @param {string[]} defaults Default ordering.
+ * @param {object} [labelMap] Optional map of additional keys.
+ * @returns {string[]} Normalized ordering.
+ */
+function normalizeSettingsOrder(candidate, defaults, labelMap = {}) {
+  const ordered = [];
+  const seen = new Set();
+  (Array.isArray(candidate) ? candidate : []).forEach((value) => {
+    const key = String(value || "").trim();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    ordered.push(key);
+  });
+  defaults.forEach((key) => {
+    if (!seen.has(key)) {
+      seen.add(key);
+      ordered.push(key);
+    }
+  });
+  Object.keys(labelMap || {}).forEach((key) => {
+    if (!seen.has(key)) {
+      seen.add(key);
+      ordered.push(key);
+    }
+  });
+  return ordered;
+}
+
+/**
+ * Compares two arrays for shallow equality.
+ * @param {string[]|null|undefined} a First array.
+ * @param {string[]|null|undefined} b Second array.
+ * @returns {boolean} Whether arrays contain identical items in the same order.
+ */
+function arraysEqual(a, b) {
+  if (a === b) return true;
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  return a.every((value, idx) => value === b[idx]);
+}
+
+/**
+ * Compares two maps for shallow equality.
+ * @param {object|null|undefined} a First map.
+ * @param {object|null|undefined} b Second map.
+ * @returns {boolean} Whether maps contain identical key/value pairs.
+ */
+function shallowEqualMaps(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every((key) => a[key] === b[key]);
 }
 
 /**
@@ -308,6 +412,107 @@ function normalizeSettings(targetDb) {
       targetDb.settings.sync.autoSyncOnReconnect = defaults.sync.autoSyncOnReconnect;
       changed = true;
     }
+    if (typeof targetDb.settings.sync.autoSignInOnLaunch !== "boolean") {
+      targetDb.settings.sync.autoSignInOnLaunch = defaults.sync.autoSignInOnLaunch;
+      changed = true;
+    }
+    if (typeof targetDb.settings.sync.backgroundIntervalSeconds !== "number") {
+      targetDb.settings.sync.backgroundIntervalSeconds = defaults.sync.backgroundIntervalSeconds;
+      changed = true;
+    }
+  }
+
+  if (!targetDb.settings.ui || typeof targetDb.settings.ui !== "object") {
+    targetDb.settings.ui = { ...defaults.ui };
+    changed = true;
+  } else {
+    if (typeof targetDb.settings.ui.defaultModule !== "string") {
+      targetDb.settings.ui.defaultModule = defaults.ui.defaultModule;
+      changed = true;
+    }
+    if (typeof targetDb.settings.ui.defaultCalendarView !== "string") {
+      targetDb.settings.ui.defaultCalendarView = defaults.ui.defaultCalendarView;
+      changed = true;
+    }
+    if (typeof targetDb.settings.ui.theme !== "string") {
+      targetDb.settings.ui.theme = defaults.ui.theme;
+      changed = true;
+    }
+  }
+
+  if (!targetDb.settings.person || typeof targetDb.settings.person !== "object") {
+    targetDb.settings.person = { ...defaults.person };
+    changed = true;
+  } else if (typeof targetDb.settings.person.defaultLabel !== "string") {
+    targetDb.settings.person.defaultLabel = defaults.person.defaultLabel;
+    changed = true;
+  }
+
+  if (!targetDb.settings.labels || typeof targetDb.settings.labels !== "object") {
+    targetDb.settings.labels = { ...defaults.labels };
+    changed = true;
+  } else {
+    const normalizedUpdateTypes = normalizeSettingsMap(
+      targetDb.settings.labels.updateTypes,
+      defaults.labels.updateTypes
+    );
+    if (!shallowEqualMaps(targetDb.settings.labels.updateTypes, normalizedUpdateTypes)) {
+      targetDb.settings.labels.updateTypes = normalizedUpdateTypes;
+      changed = true;
+    }
+
+    const normalizedTaskStatuses = normalizeSettingsMap(
+      targetDb.settings.labels.taskStatuses,
+      defaults.labels.taskStatuses
+    );
+    if (!shallowEqualMaps(targetDb.settings.labels.taskStatuses, normalizedTaskStatuses)) {
+      targetDb.settings.labels.taskStatuses = normalizedTaskStatuses;
+      changed = true;
+    }
+
+    const normalizedTaskPriorities = normalizeSettingsMap(
+      targetDb.settings.labels.taskPriorities,
+      defaults.labels.taskPriorities
+    );
+    if (!shallowEqualMaps(targetDb.settings.labels.taskPriorities, normalizedTaskPriorities)) {
+      targetDb.settings.labels.taskPriorities = normalizedTaskPriorities;
+      changed = true;
+    }
+  }
+
+  if (!targetDb.settings.order || typeof targetDb.settings.order !== "object") {
+    targetDb.settings.order = { ...defaults.order };
+    changed = true;
+  } else {
+    const normalizedUpdateOrder = normalizeSettingsOrder(
+      targetDb.settings.order.updateTypes,
+      defaults.order.updateTypes,
+      targetDb.settings.labels?.updateTypes
+    );
+    if (!arraysEqual(targetDb.settings.order.updateTypes, normalizedUpdateOrder)) {
+      targetDb.settings.order.updateTypes = normalizedUpdateOrder;
+      changed = true;
+    }
+
+    const normalizedStatusOrder = normalizeSettingsOrder(
+      targetDb.settings.order.taskStatuses,
+      defaults.order.taskStatuses,
+      targetDb.settings.labels?.taskStatuses
+    );
+    if (!arraysEqual(targetDb.settings.order.taskStatuses, normalizedStatusOrder)) {
+      targetDb.settings.order.taskStatuses = normalizedStatusOrder;
+      changed = true;
+    }
+
+    const normalizedPriorityOrder = normalizeSettingsOrder(
+      targetDb.settings.order.taskPriorities,
+      defaults.order.taskPriorities,
+      targetDb.settings.labels?.taskPriorities
+    );
+    if (!arraysEqual(targetDb.settings.order.taskPriorities, normalizedPriorityOrder)) {
+      targetDb.settings.order.taskPriorities = normalizedPriorityOrder;
+      changed = true;
+    }
   }
 
   if (!targetDb.settings.updatedAt) {
@@ -338,6 +543,149 @@ function getSettingValue(path) {
 }
 
 /**
+ * Retrieves a map-like setting with a fallback default.
+ * @param {string} path Dot-separated path for the setting key.
+ * @param {object} fallback Default map.
+ * @returns {object} Map of string labels keyed by identifier.
+ */
+function getSettingMap(path, fallback) {
+  const value = getSettingValue(path);
+  return normalizeSettingsMap(value, fallback);
+}
+
+/**
+ * Retrieves an ordered list setting, preserving defaults and known keys.
+ * @param {string} path Dot-separated path for the setting key.
+ * @param {string[]} fallback Default ordering.
+ * @param {object} [labelMap] Optional label map for additional keys.
+ * @returns {string[]} Ordered list of keys.
+ */
+function getSettingOrder(path, fallback, labelMap = {}) {
+  const value = getSettingValue(path);
+  return normalizeSettingsOrder(value, fallback, labelMap);
+}
+
+/**
+ * Builds the update type label map using settings with defaults.
+ * @returns {object} Update type labels.
+ */
+function getUpdateTypeLabels() {
+  return getSettingMap("labels.updateTypes", DEFAULT_UPDATE_TYPE_LABELS);
+}
+
+/**
+ * Builds the update type ordering using settings with defaults.
+ * @returns {string[]} Ordered update type keys.
+ */
+function getUpdateTypeOrder() {
+  const labels = getUpdateTypeLabels();
+  return getSettingOrder("order.updateTypes", DEFAULT_UPDATE_TYPE_ORDER, labels);
+}
+
+/**
+ * Determines the default update type to use for new entries.
+ * @returns {string} Default update type key.
+ */
+function getDefaultUpdateType() {
+  return getUpdateTypeOrder()[0] || "update";
+}
+
+/**
+ * Builds task status labels using settings with defaults.
+ * @returns {object} Task status labels.
+ */
+function getTaskStatusLabels() {
+  return getSettingMap("labels.taskStatuses", DEFAULT_TASK_STATUS_LABELS);
+}
+
+/**
+ * Builds task priority labels using settings with defaults.
+ * @returns {object} Task priority labels.
+ */
+function getTaskPriorityLabels() {
+  return getSettingMap("labels.taskPriorities", DEFAULT_TASK_PRIORITY_LABELS);
+}
+
+/**
+ * Builds task status ordering using settings with defaults.
+ * @returns {string[]} Ordered task status keys.
+ */
+function getTaskStatusOrder() {
+  const labels = getTaskStatusLabels();
+  return getSettingOrder("order.taskStatuses", DEFAULT_TASK_STATUS_ORDER, labels);
+}
+
+/**
+ * Builds task priority ordering using settings with defaults.
+ * @returns {string[]} Ordered task priority keys.
+ */
+function getTaskPriorityOrder() {
+  const labels = getTaskPriorityLabels();
+  return getSettingOrder("order.taskPriorities", DEFAULT_TASK_PRIORITY_ORDER, labels);
+}
+
+/**
+ * Determines the default task status key for new entries.
+ * @returns {string} Default status key.
+ */
+function getDefaultTaskStatus() {
+  const labels = getTaskStatusLabels();
+  if (labels.todo) return "todo";
+  return getTaskStatusOrder()[0] || "todo";
+}
+
+/**
+ * Determines the default task priority key for new entries.
+ * @returns {string} Default priority key.
+ */
+function getDefaultTaskPriority() {
+  const labels = getTaskPriorityLabels();
+  if (labels.medium) return "medium";
+  return getTaskPriorityOrder()[0] || "medium";
+}
+
+/**
+ * Determines the configured default person label.
+ * @param {object} [targetDb] Optional database instance to read from.
+ * @returns {string} Default person label.
+ */
+function getDefaultPersonLabel(targetDb = db) {
+  const label = targetDb?.settings?.person?.defaultLabel;
+  if (typeof label === "string" && label.trim()) {
+    return label.trim();
+  }
+  return DEFAULT_PERSON_NAME;
+}
+
+/**
+ * Determines the configured background sync interval in milliseconds.
+ * @returns {number} Interval in milliseconds (0 disables background sync).
+ */
+function getAutoSyncIntervalMs() {
+  const seconds = Number(getSettingValue("sync.backgroundIntervalSeconds"));
+  if (Number.isNaN(seconds) || seconds <= 0) {
+    return 0;
+  }
+  return seconds * 1000;
+}
+
+/**
+ * Applies the configured theme class to the document body.
+ */
+function applyThemeFromSettings() {
+  const theme = (getSettingValue("ui.theme") || DEFAULT_THEME_MODE).toLowerCase();
+  document.body.classList.toggle("theme-light", theme === "light");
+}
+
+/**
+ * Applies default module and calendar view settings to UI state.
+ */
+function applyDefaultUiSettings() {
+  activeModule = getSettingValue("ui.defaultModule") || DEFAULT_MODULE;
+  meetingCalendarView = getSettingValue("ui.defaultCalendarView") || DEFAULT_MEETING_CALENDAR_VIEW;
+}
+
+/**
  * Updates a nested settings value on the database, creating objects as needed.
  * @param {string} path Dot-separated path for the setting key.
  * @param {unknown} value New value to persist.
@@ -365,7 +713,36 @@ function setSettingValue(path, value) {
  * @param {unknown} rawValue Raw UI value.
  * @returns {unknown} Cleaned value for storage.
  */
-function coerceSettingValue(path, rawValue) {
+function coerceSettingValue(path, rawValue, type = "") {
+  if (type === "map") {
+    const parsed = parseSettingMap(rawValue);
+    if (path === "labels.updateTypes") {
+      return normalizeSettingsMap(parsed, DEFAULT_UPDATE_TYPE_LABELS);
+    }
+    if (path === "labels.taskStatuses") {
+      return normalizeSettingsMap(parsed, DEFAULT_TASK_STATUS_LABELS);
+    }
+    if (path === "labels.taskPriorities") {
+      return normalizeSettingsMap(parsed, DEFAULT_TASK_PRIORITY_LABELS);
+    }
+    return parsed;
+  }
+  if (type === "list") {
+    const parsed = parseSettingList(rawValue);
+    if (path === "order.updateTypes") {
+      const labels = getUpdateTypeLabels();
+      return normalizeSettingsOrder(parsed, DEFAULT_UPDATE_TYPE_ORDER, labels);
+    }
+    if (path === "order.taskStatuses") {
+      const labels = getTaskStatusLabels();
+      return normalizeSettingsOrder(parsed, DEFAULT_TASK_STATUS_ORDER, labels);
+    }
+    if (path === "order.taskPriorities") {
+      const labels = getTaskPriorityLabels();
+      return normalizeSettingsOrder(parsed, DEFAULT_TASK_PRIORITY_ORDER, labels);
+    }
+    return parsed;
+  }
   if (path === "sync.frequencyMinutes") {
     const asNumber = Number(rawValue);
     if (Number.isNaN(asNumber) || asNumber < 0) {
@@ -373,7 +750,68 @@ function coerceSettingValue(path, rawValue) {
     }
     return asNumber;
   }
+  if (path === "sync.backgroundIntervalSeconds") {
+    const asNumber = Number(rawValue);
+    if (Number.isNaN(asNumber) || asNumber < 0) {
+      return buildDefaultSettings().sync.backgroundIntervalSeconds;
+    }
+    return asNumber;
+  }
   return rawValue;
+}
+
+/**
+ * Formats a map-like setting for display in textarea controls.
+ * @param {object} value Map value to format.
+ * @returns {string} String representation with one entry per line.
+ */
+function formatSettingMap(value) {
+  if (!value || typeof value !== "object") return "";
+  return Object.entries(value)
+    .map(([key, label]) => `${key}: ${label}`)
+    .join("\n");
+}
+
+/**
+ * Formats an ordered list setting for display.
+ * @param {string[]} value Ordered list to format.
+ * @returns {string} Comma-separated list string.
+ */
+function formatSettingList(value) {
+  if (!Array.isArray(value)) return "";
+  return value.join(", ");
+}
+
+/**
+ * Parses a textarea map value into an object.
+ * @param {string} rawValue Raw textarea value.
+ * @returns {object} Parsed map.
+ */
+function parseSettingMap(rawValue) {
+  const map = {};
+  const lines = String(rawValue || "").split(/\r?\n/);
+  lines.forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    const separatorIndex = trimmed.search(/[:=]/);
+    if (separatorIndex === -1) return;
+    const key = trimmed.slice(0, separatorIndex).trim();
+    const label = trimmed.slice(separatorIndex + 1).trim();
+    if (!key || !label) return;
+    map[key] = label;
+  });
+  return map;
+}
+
+/**
+ * Parses a list control value into an array of keys.
+ * @param {string} rawValue Raw control value.
+ * @returns {string[]} Parsed ordered list.
+ */
+function parseSettingList(rawValue) {
+  const chunks = String(rawValue || "").split(/[\n,]/);
+  const items = chunks.map(item => item.trim()).filter(Boolean);
+  return Array.from(new Set(items));
 }
 
 /**
@@ -506,13 +944,15 @@ function validatePersonDraft(draft, personId = null) {
  * @returns {object} Draft fields for editing.
  */
 function createTaskDraft(task) {
+  const defaultPriority = getDefaultTaskPriority();
+  const defaultStatus = getDefaultTaskStatus();
   return {
     title: task?.title || "",
     notes: task?.notes || "",
     ownerId: task?.ownerId || getDefaultPersonId() || "",
     dueDate: task?.dueDate || "",
-    priority: task?.priority || "medium",
-    status: task?.status || "todo",
+    priority: task?.priority || defaultPriority,
+    status: task?.status || defaultStatus,
     link: task?.link || "",
     updateTargets: Array.isArray(task?.updateTargets) ? task.updateTargets : [],
     updateStatus: task?.updateStatus || {},
@@ -686,7 +1126,8 @@ function buildUpdateStatusForTargets(targetIds, existingStatus = {}) {
  * @returns {string} Friendly label for UI rendering.
  */
 function getUpdateTypeLabel(type) {
-  return UPDATE_TYPE_LABELS[type] || type;
+  const labels = getUpdateTypeLabels();
+  return labels[type] || type;
 }
 
 /**
@@ -917,11 +1358,12 @@ function formatActionTimelineLabel(action) {
 
 function makeDefaultDb() {
   // Seed with the required default person record so every module has a shared entity.
-  const defaultPerson = createDefaultPersonRecord();
+  const defaultSettings = buildDefaultSettings();
+  const defaultPerson = createDefaultPersonRecord(defaultSettings.person.defaultLabel);
   return {
     schemaVersion: 1,
     updatedAt: nowIso(),
-    settings: buildDefaultSettings(),
+    settings: defaultSettings,
     templates: createBuiltinTemplates(),
     people: [defaultPerson],
     groups: [],
@@ -1012,6 +1454,7 @@ function maybeEnableAuth() {
 
   // Default state before sign-in
   updateAuthUi();
+  maybeAttemptAutoSignIn();
 }
 
 function updateAuthUi() {
@@ -1030,6 +1473,38 @@ function updateAuthUi() {
     : "Local only",
     driveReady ? (hasUnsyncedChanges ? "warn" : "ok") : "neutral"
   );
+}
+
+/**
+ * Attempts a silent Drive re-auth on launch when enabled in settings.
+ */
+function maybeAttemptAutoSignIn() {
+  if (autoSignInAttempted) return;
+  if (!appReady || !gapiInited || !gisInited || !tokenClient) return;
+  if (!getSettingValue("sync.autoSignInOnLaunch")) return;
+
+  const gapiClient = window.gapi?.client;
+  const existingToken = gapiClient?.getToken?.() || null;
+  if (existingToken) {
+    updateAuthUi();
+    autoSignInAttempted = true;
+    return;
+  }
+
+  tokenClient.callback = (resp) => {
+    if (resp?.error) {
+      console.warn("Silent sign-in failed.", resp);
+      autoSignInAttempted = true;
+      updateAuthUi();
+      return;
+    }
+    window.gapi?.client?.setToken?.(resp);
+    autoSignInAttempted = true;
+    updateAuthUi();
+  };
+
+  autoSignInAttempted = true;
+  tokenClient.requestAccessToken({ prompt: "" });
 }
 
 async function handleAuthClick() {
@@ -1351,10 +1826,10 @@ function dedupeCollectionBySignature(records, { ignoreKeys = [] } = {}) {
  * @param {object[]} people People collection to normalize.
  * @returns {{ people: object[], idMap: Map<string, string>, changed: boolean, defaultPerson: object|null }}
  */
-function enforceSingleDefaultPerson(people) {
+function enforceSingleDefaultPerson(people, defaultLabel = DEFAULT_PERSON_NAME) {
   const alivePeople = (people || []).filter(p => p && !p.deleted);
   const candidates = alivePeople.filter(person =>
-    person.isDefault || (person.name || "").trim().toLowerCase() === DEFAULT_PERSON_NAME.toLowerCase()
+    person.isDefault || (person.name || "").trim().toLowerCase() === defaultLabel.toLowerCase()
   );
   const idMap = new Map();
   let changed = false;
@@ -1385,8 +1860,8 @@ function enforceSingleDefaultPerson(people) {
   });
 
   let winnerChanged = false;
-  if (winner.name !== DEFAULT_PERSON_NAME) {
-    winner.name = DEFAULT_PERSON_NAME;
+  if (winner.name !== defaultLabel) {
+    winner.name = defaultLabel;
     winnerChanged = true;
   }
   if (winner.email) {
@@ -1619,7 +2094,10 @@ function normalizeDuplicateEntities(targetDb) {
   let changed = false;
   const ignoreKeys = ["id", "updatedAt", "createdAt", "deleted"];
 
-  const defaultResult = enforceSingleDefaultPerson(targetDb.people || []);
+  const defaultResult = enforceSingleDefaultPerson(
+    targetDb.people || [],
+    getDefaultPersonLabel(targetDb)
+  );
   if (defaultResult.changed) {
     targetDb.people = defaultResult.people;
     changed = true;
@@ -1845,9 +2323,9 @@ async function loadLocal() {
       topicId: meta.actionsFilters?.topicId || "",
       status: meta.actionsFilters?.status || "",
     };
-    meetingCalendarView = meta.meetingCalendarView || "week";
+    meetingCalendarView = meta.meetingCalendarView || DEFAULT_MEETING_CALENDAR_VIEW;
     meetingCalendarAnchor = meta.meetingCalendarAnchor ? new Date(meta.meetingCalendarAnchor) : new Date();
-    activeModule = meta.activeModule || "meetings";
+    activeModule = meta.activeModule || DEFAULT_MODULE;
     meetingModuleTab = meta.meetingModuleTab || "meeting";
     taskFilters = {
       status: meta.taskFilters?.status || "",
@@ -1865,6 +2343,9 @@ async function loadLocal() {
   } else {
     await saveMeta();
   }
+
+  // Override persistent UI state with configured defaults at launch.
+  applyDefaultUiSettings();
 }
 
 async function saveLocal() {
@@ -1932,10 +2413,15 @@ function requestAutoSync(trigger) {
 function startAutoSyncTimer() {
   if (autoSyncTimerId) {
     clearInterval(autoSyncTimerId);
+    autoSyncTimerId = null;
+  }
+  const intervalMs = getAutoSyncIntervalMs();
+  if (!intervalMs) {
+    return;
   }
   autoSyncTimerId = setInterval(() => {
     requestAutoSync("interval");
-  }, AUTO_SYNC_INTERVAL_MS);
+  }, intervalMs);
 }
 
 /**
@@ -2105,7 +2591,7 @@ function alive(arr) {
 function isDefaultPerson(person) {
   if (!person) return false;
   if (person.isDefault) return true;
-  return (person.name || "").trim().toLowerCase() === DEFAULT_PERSON_NAME.toLowerCase();
+  return (person.name || "").trim().toLowerCase() === getDefaultPersonLabel().toLowerCase();
 }
 
 /**
@@ -2117,20 +2603,21 @@ function ensureDefaultPersonInDb(targetDb) {
   if (!targetDb) return { person: null, changed: false };
   if (!targetDb.people) targetDb.people = [];
 
+  const defaultLabel = getDefaultPersonLabel(targetDb);
   const people = targetDb.people;
   const flagged = people.find(p => p.isDefault);
-  const named = people.find(p => (p.name || "").trim().toLowerCase() === DEFAULT_PERSON_NAME.toLowerCase());
+  const named = people.find(p => (p.name || "").trim().toLowerCase() === defaultLabel.toLowerCase());
   const person = flagged || named;
 
   if (!person) {
-    const created = createDefaultPersonRecord();
+    const created = createDefaultPersonRecord(defaultLabel);
     people.push(created);
     return { person: created, changed: true };
   }
 
   let changed = false;
-  if (person.name !== DEFAULT_PERSON_NAME) {
-    person.name = DEFAULT_PERSON_NAME;
+  if (person.name !== defaultLabel) {
+    person.name = defaultLabel;
     changed = true;
   }
   if (person.email) {
@@ -2161,6 +2648,21 @@ function ensureDefaultPersonInDb(targetDb) {
 }
 
 /**
+ * Applies a default person label update to the in-memory database.
+ * @param {string} label New default label to apply.
+ */
+function applyDefaultPersonLabel(label) {
+  if (!db || !db.people) return;
+  const trimmed = String(label || "").trim() || DEFAULT_PERSON_NAME;
+  const person = db.people.find(p => p.isDefault);
+  if (!person) return;
+  if (person.name !== trimmed) {
+    person.name = trimmed;
+    person.updatedAt = nowIso();
+  }
+}
+
+/**
  * Retrieves the default person identifier from a provided database instance.
  * @param {object} targetDb Database instance to scan.
  * @returns {string} Default person id, or empty string if unavailable.
@@ -2168,7 +2670,7 @@ function ensureDefaultPersonInDb(targetDb) {
 function getDefaultPersonIdFromDb(targetDb) {
   const people = alive(targetDb?.people || []);
   const defaultPerson = people.find(p => p.isDefault)
-    || people.find(p => (p.name || "").trim().toLowerCase() === DEFAULT_PERSON_NAME.toLowerCase());
+    || people.find(p => (p.name || "").trim().toLowerCase() === getDefaultPersonLabel(targetDb).toLowerCase());
   return defaultPerson?.id || "";
 }
 
@@ -2340,7 +2842,10 @@ function normalizeTaskAndActionData(targetDb) {
  */
 function getDefaultPerson() {
   const people = alive(db.people);
-  return people.find(p => p.isDefault) || people.find(p => (p.name || "").trim().toLowerCase() === DEFAULT_PERSON_NAME.toLowerCase()) || null;
+  const defaultLabel = getDefaultPersonLabel();
+  return people.find(p => p.isDefault)
+    || people.find(p => (p.name || "").trim().toLowerCase() === defaultLabel.toLowerCase())
+    || null;
 }
 
 /**
@@ -2398,7 +2903,7 @@ function ensureTopic(name) {
 function ensurePerson(name) {
   const existing = alive(db.people).find(p => p.name.toLowerCase() === name.toLowerCase());
   if (existing) return existing.id;
-  if (name.trim().toLowerCase() === DEFAULT_PERSON_NAME.toLowerCase()) {
+  if (name.trim().toLowerCase() === getDefaultPersonLabel().toLowerCase()) {
     return getDefaultPersonId();
   }
   const p = { id: uid("person"), name, email: "", organisation: "", jobTitle: "", updatedAt: nowIso() };
@@ -2544,6 +3049,49 @@ function renderSelectOptions(select, options, {placeholder=null} = {}) {
   }
 }
 
+/**
+ * Builds an array of select option descriptors from ordered labels.
+ * @param {string[]} order Ordered keys for the options.
+ * @param {object} labels Map of labels keyed by option value.
+ * @returns {{value:string,label:string}[]} Options list.
+ */
+function buildLabelOptions(order, labels) {
+  return (order || []).map(key => ({ value: key, label: labels[key] || key }));
+}
+
+/**
+ * Creates HTML option markup for a select using ordered labels.
+ * @param {string[]} order Ordered keys for the options.
+ * @param {object} labels Map of labels keyed by option value.
+ * @param {string} selectedValue Currently selected value.
+ * @param {boolean} [includeBlank=false] Whether to include a blank option.
+ * @param {string} [blankLabel="— None —"] Label for the blank option.
+ * @returns {string} Options markup.
+ */
+function buildSelectOptionsMarkup(order, labels, selectedValue, includeBlank = false, blankLabel = "— None —") {
+  const entries = buildLabelOptions(order, labels);
+  const blankOption = includeBlank ? `<option value="">${escapeHtml(blankLabel)}</option>` : "";
+  const options = entries.map(({ value, label }) => {
+    const isSelected = value === selectedValue;
+    return `<option value="${escapeHtml(value)}"${isSelected ? " selected" : ""}>${escapeHtml(label)}</option>`;
+  }).join("");
+  return `${blankOption}${options}`;
+}
+
+/**
+ * Builds an order lookup map for sorting operations.
+ * @param {string[]} order Ordered keys.
+ * @returns {object} Map of key to numeric sort order.
+ */
+function buildOrderLookup(order) {
+  const lookup = {};
+  (order || []).forEach((key, idx) => {
+    if (!key) return;
+    lookup[key] = idx;
+  });
+  return lookup;
+}
+
 function renderTemplates() {
   const tplSel = byId("meeting_template");
   if (!tplSel) return;
@@ -2563,6 +3111,10 @@ function renderSettings() {
     const type = control.dataset.settingType || control.type;
     if (type === "checkbox") {
       control.checked = Boolean(currentValue);
+    } else if (type === "map") {
+      control.value = formatSettingMap(currentValue);
+    } else if (type === "list") {
+      control.value = formatSettingList(currentValue);
     } else {
       control.value = String(currentValue);
     }
@@ -2657,6 +3209,79 @@ function renderUpdateLightboxOptions() {
 
   if (targetsList) {
     targetsList.innerHTML = people.map(p => `<option value="${escapeHtml(p.name)}"></option>`).join("");
+  }
+}
+
+/**
+ * Populates update type selectors based on settings.
+ */
+function renderUpdateTypeOptions() {
+  const updateTypeSelect = byId("update_type");
+  const updateQueueTypeSelect = byId("update_queue_type");
+  const labels = getUpdateTypeLabels();
+  const order = getUpdateTypeOrder();
+
+  if (updateTypeSelect) {
+    const desiredValue = updateTypeSelect.value || order[0] || "update";
+    renderSelectOptions(updateTypeSelect, buildLabelOptions(order, labels));
+    updateTypeSelect.value = order.includes(desiredValue) ? desiredValue : (order[0] || "update");
+  }
+
+  if (updateQueueTypeSelect) {
+    const currentValue = updateQueueTypeSelect.value || "";
+    renderSelectOptions(updateQueueTypeSelect, buildLabelOptions(order, labels), { placeholder: "All types" });
+    updateQueueTypeSelect.value = order.includes(currentValue) ? currentValue : "";
+  }
+}
+
+/**
+ * Populates task status selectors based on settings.
+ */
+function renderTaskStatusOptions() {
+  const labels = getTaskStatusLabels();
+  const order = getTaskStatusOrder();
+  const filterSelect = byId("task_filter_status");
+  const statusSelect = byId("task_status");
+
+  if (filterSelect) {
+    const currentValue = filterSelect.value || "";
+    renderSelectOptions(filterSelect, buildLabelOptions(order, labels), { placeholder: "All statuses" });
+    filterSelect.value = order.includes(currentValue) ? currentValue : "";
+  }
+
+  if (statusSelect) {
+    const desiredValue = statusSelect.value || getDefaultTaskStatus();
+    renderSelectOptions(statusSelect, buildLabelOptions(order, labels));
+    statusSelect.value = order.includes(desiredValue) ? desiredValue : getDefaultTaskStatus();
+  }
+}
+
+/**
+ * Populates task priority selectors based on settings.
+ */
+function renderTaskPriorityOptions() {
+  const labels = getTaskPriorityLabels();
+  const order = getTaskPriorityOrder();
+  const filterSelect = byId("task_filter_priority");
+  const prioritySelect = byId("task_priority");
+  const updatePrioritySelect = byId("update_priority");
+
+  if (filterSelect) {
+    const currentValue = filterSelect.value || "";
+    renderSelectOptions(filterSelect, buildLabelOptions(order, labels), { placeholder: "All priorities" });
+    filterSelect.value = order.includes(currentValue) ? currentValue : "";
+  }
+
+  if (prioritySelect) {
+    const desiredValue = prioritySelect.value || getDefaultTaskPriority();
+    renderSelectOptions(prioritySelect, buildLabelOptions(order, labels));
+    prioritySelect.value = order.includes(desiredValue) ? desiredValue : getDefaultTaskPriority();
+  }
+
+  if (updatePrioritySelect) {
+    const desiredValue = updatePrioritySelect.value || getDefaultTaskPriority();
+    renderSelectOptions(updatePrioritySelect, buildLabelOptions(order, labels));
+    updatePrioritySelect.value = order.includes(desiredValue) ? desiredValue : getDefaultTaskPriority();
   }
 }
 
@@ -3180,9 +3805,7 @@ function renderMeetingSections(meeting, tpl) {
               <div class="formrow">
                 <label>Priority</label>
                 <select data-field="priority">
-                  <option value="low">Low</option>
-                  <option value="medium" selected>Medium</option>
-                  <option value="high">High</option>
+                  ${buildSelectOptionsMarkup(getTaskPriorityOrder(), getTaskPriorityLabels(), getDefaultTaskPriority())}
                 </select>
               </div>
 
@@ -3405,7 +4028,8 @@ function renderItemCard(it) {
     : "";
 
   const linkBadge = it.link ? `<span class="badge badge--accent">Link</span>` : "";
-  const priorityBadge = it.priority ? `<span class="badge">Priority: ${escapeHtml(TASK_PRIORITY_LABELS[it.priority] || it.priority)}</span>` : "";
+  const priorityLabels = getTaskPriorityLabels();
+  const priorityBadge = it.priority ? `<span class="badge">Priority: ${escapeHtml(priorityLabels[it.priority] || it.priority)}</span>` : "";
 
   if (isEditing) {
     return `
@@ -3457,9 +4081,7 @@ function renderItemCard(it) {
             <div class="formrow">
               <label>Priority</label>
               <select data-edit-field="priority">
-                <option value="low"${draft.priority === "low" ? " selected" : ""}>Low</option>
-                <option value="medium"${draft.priority === "medium" ? " selected" : ""}>Medium</option>
-                <option value="high"${draft.priority === "high" ? " selected" : ""}>High</option>
+                ${buildSelectOptionsMarkup(getTaskPriorityOrder(), getTaskPriorityLabels(), draft.priority || getDefaultTaskPriority())}
               </select>
             </div>
 
@@ -3921,10 +4543,12 @@ function renderUpdateQueue() {
     grouped.get(key).push(it);
   });
 
-  const orderedTypes = [
-    ...UPDATE_TYPE_ORDER,
-    ...Array.from(grouped.keys()).filter(key => !UPDATE_TYPE_ORDER.includes(key))
-  ];
+  const orderedTypes = [...getUpdateTypeOrder()];
+  Array.from(grouped.keys()).forEach((key) => {
+    if (!orderedTypes.includes(key)) {
+      orderedTypes.push(key);
+    }
+  });
 
   const groupsHtml = orderedTypes
     .filter(key => grouped.has(key))
@@ -4470,18 +5094,20 @@ function renderTasks() {
     return statusOk && priorityOk;
   });
 
+  const priorityOrder = buildOrderLookup(getTaskPriorityOrder());
+  const statusOrder = buildOrderLookup(getTaskStatusOrder());
   // Sort by due date (ascending), then priority, then status, then updated time.
   const sorted = filtered.sort((a, b) => {
     const aDue = a.dueDate ? new Date(`${a.dueDate}T00:00:00`).getTime() : Number.POSITIVE_INFINITY;
     const bDue = b.dueDate ? new Date(`${b.dueDate}T00:00:00`).getTime() : Number.POSITIVE_INFINITY;
     if (aDue !== bDue) return aDue - bDue;
 
-    const aPriority = TASK_PRIORITY_ORDER[a.priority] ?? TASK_PRIORITY_ORDER.medium;
-    const bPriority = TASK_PRIORITY_ORDER[b.priority] ?? TASK_PRIORITY_ORDER.medium;
+    const aPriority = priorityOrder[a.priority] ?? priorityOrder.medium ?? Number.POSITIVE_INFINITY;
+    const bPriority = priorityOrder[b.priority] ?? priorityOrder.medium ?? Number.POSITIVE_INFINITY;
     if (aPriority !== bPriority) return aPriority - bPriority;
 
-    const aStatus = TASK_STATUS_ORDER[a.status] ?? TASK_STATUS_ORDER.todo;
-    const bStatus = TASK_STATUS_ORDER[b.status] ?? TASK_STATUS_ORDER.todo;
+    const aStatus = statusOrder[a.status] ?? statusOrder.todo ?? Number.POSITIVE_INFINITY;
+    const bStatus = statusOrder[b.status] ?? statusOrder.todo ?? Number.POSITIVE_INFINITY;
     if (aStatus !== bStatus) return aStatus - bStatus;
 
     return Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
@@ -4522,6 +5148,10 @@ function renderTasks() {
 function renderTaskCard(task) {
   const statusKey = task.status || "todo";
   const priorityKey = task.priority || "medium";
+  const statusLabels = getTaskStatusLabels();
+  const statusOrder = getTaskStatusOrder();
+  const priorityLabels = getTaskPriorityLabels();
+  const priorityOrder = getTaskPriorityOrder();
   const isLinkedAction = task.sourceType === "item";
   const meeting = task.meetingId ? getMeeting(task.meetingId) : null;
   const topic = task.topicId ? getTopic(task.topicId) : null;
@@ -4549,17 +5179,12 @@ function renderTaskCard(task) {
       </div>
       <div class="task-cell">
         <select class="task-status task-status--${statusKey}" data-task-field="status">
-          <option value="todo"${statusKey === "todo" ? " selected" : ""}>To do</option>
-          <option value="in_progress"${statusKey === "in_progress" ? " selected" : ""}>In progress</option>
-          <option value="blocked"${statusKey === "blocked" ? " selected" : ""}>Blocked</option>
-          <option value="done"${statusKey === "done" ? " selected" : ""}>Done</option>
+          ${buildSelectOptionsMarkup(statusOrder, statusLabels, statusKey)}
         </select>
       </div>
       <div class="task-cell">
         <select class="task-priority task-priority--${priorityKey}" data-task-field="priority">
-          <option value="low"${priorityKey === "low" ? " selected" : ""}>Low</option>
-          <option value="medium"${priorityKey === "medium" ? " selected" : ""}>Medium</option>
-          <option value="high"${priorityKey === "high" ? " selected" : ""}>High</option>
+          ${buildSelectOptionsMarkup(priorityOrder, priorityLabels, priorityKey)}
         </select>
       </div>
       <div class="task-cell">
@@ -4753,11 +5378,15 @@ function wireTaskList(container) {
 }
 
 function renderAll() {
+  applyThemeFromSettings();
   renderTemplates();
   renderTopics();
   renderPeopleSelects();
   renderTaskLightboxOptions();
   renderUpdateLightboxOptions();
+  renderUpdateTypeOptions();
+  renderTaskStatusOptions();
+  renderTaskPriorityOptions();
   renderMeetingCounterpartSelects();
   renderPeopleManager();
   renderGroups();
@@ -4824,6 +5453,8 @@ function syncMeetingOneToOneFields() {
  */
 function openTaskLightbox() {
   renderTaskLightboxOptions();
+  renderTaskStatusOptions();
+  renderTaskPriorityOptions();
   openLightbox("task_lightbox", "task_title");
 }
 
@@ -5004,13 +5635,15 @@ function setLightboxError(errorId, message) {
  * @returns {object} Task draft from the form.
  */
 function readTaskFormDraft() {
+  const defaultPriority = getDefaultTaskPriority();
+  const defaultStatus = getDefaultTaskStatus();
   return {
     title: byId("task_title")?.value || "",
     notes: byId("task_notes")?.value || "",
     ownerId: byId("task_owner")?.value || "",
     dueDate: byId("task_due")?.value || "",
-    priority: byId("task_priority")?.value || "medium",
-    status: byId("task_status")?.value || "todo",
+    priority: byId("task_priority")?.value || defaultPriority,
+    status: byId("task_status")?.value || defaultStatus,
     link: byId("task_link")?.value?.trim() || "",
     updateTargetsRaw: byId("task_update_targets")?.value || "",
   };
@@ -5045,14 +5678,15 @@ function clearTaskForm() {
  * @returns {object} Update draft from the form.
  */
 function readUpdateFormDraft() {
+  const defaultPriority = getDefaultTaskPriority();
   return {
     title: byId("update_title")?.value || "",
     notes: byId("update_notes")?.value || "",
     ownerId: byId("update_owner")?.value || "",
     topicId: byId("update_topic")?.value || "",
-    updateType: byId("update_type")?.value || "update",
+    updateType: byId("update_type")?.value || getDefaultUpdateType(),
     status: byId("update_status")?.value || "",
-    priority: byId("update_priority")?.value || "medium",
+    priority: byId("update_priority")?.value || defaultPriority,
     dueDate: byId("update_due")?.value || "",
     link: byId("update_link")?.value?.trim() || "",
     updateTargetsRaw: byId("update_targets")?.value || "",
@@ -5078,9 +5712,9 @@ function clearUpdateForm() {
   if (notesInput) notesInput.value = "";
   if (ownerSelect) ownerSelect.value = getDefaultPersonId() || "";
   if (topicSelect) topicSelect.value = "";
-  if (typeSelect) typeSelect.value = "update";
+  if (typeSelect) typeSelect.value = getDefaultUpdateType();
   if (statusSelect) statusSelect.value = "";
-  if (prioritySelect) prioritySelect.value = "medium";
+  if (prioritySelect) prioritySelect.value = getDefaultTaskPriority();
   if (dueInput) dueInput.value = "";
   if (linkInput) linkInput.value = "";
   if (targetsInput) targetsInput.value = "";
@@ -5092,6 +5726,8 @@ function clearUpdateForm() {
  */
 function openUpdateLightbox() {
   renderUpdateLightboxOptions();
+  renderUpdateTypeOptions();
+  renderTaskPriorityOptions();
   clearUpdateForm();
   openLightbox("update_lightbox", "update_title");
 }
@@ -5310,7 +5946,8 @@ async function addAdHocUpdate() {
   }
 
   // Ensure ad-hoc updates always store a known update type for grouping.
-  const updateType = UPDATE_TYPE_LABELS[draft.updateType] ? draft.updateType : "update";
+  const updateTypeLabels = getUpdateTypeLabels();
+  const updateType = updateTypeLabels[draft.updateType] ? draft.updateType : getUpdateTypeOrder()[0] || "update";
   const now = nowIso();
   const item = {
     id: uid("item"),
@@ -5856,11 +6493,34 @@ function wireSettingsControls() {
     const handler = async () => {
       db.settings = db.settings || buildDefaultSettings();
       const rawValue = readSettingControlValue(control);
-      const value = coerceSettingValue(path, rawValue);
+      const settingType = control.dataset.settingType || control.type;
+      const value = coerceSettingValue(path, rawValue, settingType);
       if (setSettingValue(path, value)) {
         db.settings.updatedAt = nowIso();
+        if (path === "person.defaultLabel") {
+          applyDefaultPersonLabel(value);
+        }
         markDirty();
         await saveLocal();
+        if (path === "sync.backgroundIntervalSeconds") {
+          startAutoSyncTimer();
+        }
+        if (path === "ui.theme") {
+          applyThemeFromSettings();
+        }
+        if (path === "ui.defaultModule") {
+          setActiveModule(value);
+        }
+        if (path === "ui.defaultCalendarView") {
+          setMeetingCalendarView(value || DEFAULT_MEETING_CALENDAR_VIEW);
+        }
+        if (path.startsWith("labels.") || path.startsWith("order.")) {
+          renderAll();
+        }
+        if (path === "sync.autoSignInOnLaunch") {
+          autoSignInAttempted = false;
+          maybeAttemptAutoSignIn();
+        }
       }
     };
     const wrappedHandler = eventName === "input" ? debounce(handler, 200) : handler;
@@ -5961,6 +6621,8 @@ async function init() {
 
   // load local DB
   await loadLocal();
+  appReady = true;
+  maybeAttemptAutoSignIn();
 
   // set default meeting datetime input to now
   const dt = new Date();
