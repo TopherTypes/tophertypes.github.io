@@ -36,6 +36,8 @@
       <button class="module-tab" data-module="people">People</button>
       <button class="module-tab" data-module="tasks">Tasks</button>
       <button class="module-tab" data-module="settings">Settings</button>
+      <!-- Distinct utility entry for ad-hoc updates outside of meeting workflows. -->
+      <button class="module-tab module-tab--utility" id="ad_hoc_update_btn" type="button">+ Ad-hoc update</button>
     </nav>
 
     <!-- Meetings module -->
@@ -581,6 +583,75 @@
         </div>
       </div>
     </section>
+
+    <!-- Ad-hoc update capture lightbox -->
+    <div class="lightbox" id="update_lightbox" aria-hidden="true">
+      <div class="lightbox__backdrop" data-lightbox-close="true"></div>
+      <div class="lightbox__panel" role="dialog" aria-modal="true" aria-labelledby="update_lightbox_title">
+        <div class="lightbox__header">
+          <h3 id="update_lightbox_title">Add an ad-hoc update</h3>
+          <button class="iconbtn" data-lightbox-close="true" aria-label="Close update form">✕</button>
+        </div>
+        <div class="formrow">
+          <label>Update summary</label>
+          <input id="update_title" type="text" placeholder="e.g., Customer rollout is underway" />
+        </div>
+        <div class="formrow">
+          <label>Notes</label>
+          <textarea id="update_notes" placeholder="Capture context, risks, or blockers…"></textarea>
+        </div>
+        <div class="grid2">
+          <div class="formrow">
+            <label>Project</label>
+            <select id="update_topic"></select>
+          </div>
+          <div class="formrow">
+            <label>Owner</label>
+            <select id="update_owner"></select>
+          </div>
+        </div>
+        <div class="grid2">
+          <div class="formrow">
+            <label>Status</label>
+            <select id="update_status">
+              <option value="">— None —</option>
+              <option value="open">Open</option>
+              <option value="in_progress">In progress</option>
+              <option value="blocked">Blocked</option>
+              <option value="done">Done</option>
+            </select>
+          </div>
+          <div class="formrow">
+            <label>Priority</label>
+            <select id="update_priority">
+              <option value="low">Low</option>
+              <option value="medium" selected>Medium</option>
+              <option value="high">High</option>
+            </select>
+          </div>
+        </div>
+        <div class="grid2">
+          <div class="formrow">
+            <label>Due date</label>
+            <input id="update_due" type="date" />
+          </div>
+          <div class="formrow">
+            <label>Link</label>
+            <input id="update_link" type="url" placeholder="https://…" />
+          </div>
+        </div>
+        <div class="formrow">
+          <label>Update targets</label>
+          <input id="update_targets" type="text" list="update_targets_list" placeholder="Add names separated by commas" />
+          <datalist id="update_targets_list"></datalist>
+        </div>
+        <div class="item__error" id="update_lightbox_error" hidden></div>
+        <div class="row row--space">
+          <button class="btn btn--primary" id="update_add_btn">Save update</button>
+          <button class="btn btn--ghost" id="update_clear_btn" type="button">Clear</button>
+        </div>
+      </div>
+    </div>
 
     <!-- Settings and data export -->
     <section class="module-panel" id="module_settings">

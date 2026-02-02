@@ -138,6 +138,19 @@ body{
   box-shadow: 0 12px 24px rgba(7,9,15,0.6);
 }
 .module-tab.is-active::before{background: var(--accent);}
+/* Utility action (ad-hoc update) stands apart from module navigation. */
+.module-tab--utility{
+  background: linear-gradient(135deg, rgba(247,178,106,0.2), rgba(124,155,255,0.15));
+  border-color: rgba(247,178,106,0.45);
+  color: var(--text);
+  font-weight: 600;
+}
+.module-tab--utility::before{background: var(--accent-warm);}
+.module-tab--utility:hover{
+  border-color: rgba(247,178,106,0.7);
+  transform: translateX(3px);
+  box-shadow: 0 14px 24px rgba(7,9,15,0.55);
+}
 
 /* Module switcher */
 .module-panel{display:none; margin-top:0;}
