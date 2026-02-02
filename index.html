@@ -760,6 +760,98 @@
           </p>
         </div>
       </div>
+
+      <div class="grid2">
+        <div class="card">
+          <h2>Defaults & appearance</h2>
+          <div class="formrow">
+            <label for="default_module">Default landing page</label>
+            <select id="default_module" data-setting-path="ui.defaultModule">
+              <option value="meetings">Meetings</option>
+              <option value="update_queue">Update queue</option>
+              <option value="projects">Projects</option>
+              <option value="people">People</option>
+              <option value="tasks">Tasks</option>
+              <option value="settings">Settings</option>
+            </select>
+          </div>
+          <div class="formrow">
+            <label for="default_calendar_view">Default calendar view</label>
+            <select id="default_calendar_view" data-setting-path="ui.defaultCalendarView">
+              <option value="week">Week</option>
+              <option value="month">Month</option>
+            </select>
+          </div>
+          <div class="formrow">
+            <label for="theme_mode">Theme</label>
+            <select id="theme_mode" data-setting-path="ui.theme">
+              <option value="dark">Dark mode</option>
+              <option value="light">Light mode</option>
+            </select>
+          </div>
+          <div class="formrow">
+            <label for="default_person_label">Default person label</label>
+            <input id="default_person_label" type="text" data-setting-path="person.defaultLabel" placeholder="e.g., Me" />
+          </div>
+          <p class="muted">
+            Use these defaults to control where you land on launch and how your default person is labeled.
+          </p>
+        </div>
+
+        <div class="card">
+          <h2>Automation & sign-in</h2>
+          <div class="formrow">
+            <label for="sync_background_interval">Background sync cadence (seconds)</label>
+            <input id="sync_background_interval" type="number" min="0" step="5" data-setting-path="sync.backgroundIntervalSeconds" data-setting-type="number" />
+          </div>
+          <div class="formrow">
+            <label>
+              <input type="checkbox" id="sync_auto_signin" data-setting-path="sync.autoSignInOnLaunch" data-setting-type="checkbox" />
+              Attempt to reconnect to Drive on launch
+            </label>
+          </div>
+          <p class="muted">
+            Set cadence to 0 to disable background sync checks. Reconnect uses Google’s silent token refresh when available.
+          </p>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div class="card">
+          <h2>Update types</h2>
+          <div class="formrow">
+            <label for="update_type_labels">Update type labels (key: label)</label>
+            <textarea id="update_type_labels" rows="6" data-setting-path="labels.updateTypes" data-setting-type="map" placeholder="update: Update"></textarea>
+          </div>
+          <div class="formrow">
+            <label for="update_type_order">Update type order (comma-separated)</label>
+            <input id="update_type_order" type="text" data-setting-path="order.updateTypes" data-setting-type="list" placeholder="update, action, decision" />
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Task vocabularies</h2>
+          <div class="formrow">
+            <label for="task_status_labels">Task status labels (key: label)</label>
+            <textarea id="task_status_labels" rows="5" data-setting-path="labels.taskStatuses" data-setting-type="map" placeholder="todo: To do"></textarea>
+          </div>
+          <div class="formrow">
+            <label for="task_status_order">Task status order (comma-separated)</label>
+            <input id="task_status_order" type="text" data-setting-path="order.taskStatuses" data-setting-type="list" placeholder="todo, in_progress, blocked" />
+          </div>
+          <div class="formrow">
+            <label for="task_priority_labels">Task priority labels (key: label)</label>
+            <textarea id="task_priority_labels" rows="4" data-setting-path="labels.taskPriorities" data-setting-type="map" placeholder="high: High"></textarea>
+          </div>
+          <div class="formrow">
+            <label for="task_priority_order">Task priority order (comma-separated)</label>
+            <input id="task_priority_order" type="text" data-setting-path="order.taskPriorities" data-setting-type="list" placeholder="high, medium, low" />
+          </div>
+          <p class="muted">
+            Keep keys consistent with existing data to avoid mismatches. New keys can be added for custom workflows.
+          </p>
+        </div>
+      </div>
     </section>
   </main>
 
