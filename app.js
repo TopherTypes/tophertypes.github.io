@@ -25,6 +25,20 @@ const ONE_TO_ONE_TEMPLATE_ID = "tpl_1on1";
 const DEFAULT_PERSON_NAME = "Me";
 // Default project color used when none is provided.
 const DEFAULT_PROJECT_COLOR = "#7c9bff";
+// Curated color presets for project selection (keep in sync with UI swatches).
+const PROJECT_COLOR_PRESETS = [
+  { label: "Indigo", value: "#7c9bff" },
+  { label: "Azure", value: "#4fb3ff" },
+  { label: "Emerald", value: "#42d6a4" },
+  { label: "Teal", value: "#4dd6d6" },
+  { label: "Lime", value: "#a7e463" },
+  { label: "Amber", value: "#f7b26a" },
+  { label: "Coral", value: "#ff8b7a" },
+  { label: "Rose", value: "#ff6a7a" },
+  { label: "Violet", value: "#b68cff" },
+  { label: "Slate", value: "#8aa1c4" },
+  { label: "Midnight", value: "#556b9b" },
+];
 
 // IndexedDB schema identifiers.
 const IDB_NAME = "meeting-notes-db";
@@ -74,6 +88,10 @@ let personCreateState = { draft: null, error: "" };
 let projectViewId = null;
 // Stores draft edits for the active project details panel.
 let projectEditorState = { projectId: null, draft: null, error: "" };
+// Tracks which groups are expanded in the People module.
+let expandedGroupIds = new Set();
+// Tracks the project targeted for deletion in the confirmation modal.
+let projectDeleteId = null;
 
 /* ================================
    TASKS MODULE CONFIG
@@ -511,7 +529,11 @@ function createProjectDraft(project) {
     ownerId: project?.ownerId || getDefaultPersonId() || "",
     startDate: project?.startDate || "",
     endDate: project?.endDate || "",
-    color: project?.color || DEFAULT_PROJECT_COLOR,
+    color: normalizeProjectColorSelection(project?.color || DEFAULT_PROJECT_COLOR),
+    description: project?.description || "",
+    outcome: project?.outcome || "",
+    benefits: project?.benefits || "",
+    targetAudience: project?.targetAudience || "",
   };
 }
 
@@ -547,6 +569,47 @@ function normalizeHexColor(value, fallback = DEFAULT_PROJECT_COLOR) {
     return hex.toLowerCase();
   }
   return fallback;
+}
+
+/**
+ * Ensures project color selections stay within the approved preset list.
+ * @param {string} value Color value from storage or user selection.
+ * @returns {string} Normalized preset color value.
+ */
+function normalizeProjectColorSelection(value) {
+  const normalized = normalizeHexColor(value, DEFAULT_PROJECT_COLOR);
+  const match = PROJECT_COLOR_PRESETS.find(preset => preset.value.toLowerCase() === normalized.toLowerCase());
+  return match ? match.value : DEFAULT_PROJECT_COLOR;
+}
+
+/**
+ * Renders a preset color picker into the provided container element.
+ * @param {string} containerId DOM id for the picker container.
+ * @param {string} groupName Radio group name for the picker.
+ * @param {string} selectedColor Currently selected color.
+ */
+function renderProjectColorPicker(containerId, groupName, selectedColor) {
+  const container = byId(containerId);
+  if (!container) return;
+  const resolved = normalizeProjectColorSelection(selectedColor);
+  container.innerHTML = PROJECT_COLOR_PRESETS.map(preset => `
+    <label class="color-option">
+      <input type="radio" name="${escapeHtml(groupName)}" value="${escapeHtml(preset.value)}" ${preset.value === resolved ? "checked" : ""} />
+      <span class="color-swatch" style="--swatch:${escapeHtml(preset.value)}"></span>
+      <span>${escapeHtml(preset.label)}</span>
+    </label>
+  `).join("");
+}
+
+/**
+ * Reads the currently selected project color from a preset group.
+ * @param {string} groupName Radio group name used for the picker.
+ * @param {string} fallback Color fallback if nothing selected.
+ * @returns {string} Normalized project color selection.
+ */
+function readProjectColorChoice(groupName, fallback = DEFAULT_PROJECT_COLOR) {
+  const selected = document.querySelector(`input[name="${groupName}"]:checked`);
+  return normalizeProjectColorSelection(selected?.value || fallback);
 }
 
 /**
@@ -2099,6 +2162,27 @@ function normalizeProjectData(targetDb) {
       topic.color = DEFAULT_PROJECT_COLOR;
       topicChanged = true;
     }
+    const normalizedColor = normalizeProjectColorSelection(topic.color);
+    if (topic.color !== normalizedColor) {
+      topic.color = normalizedColor;
+      topicChanged = true;
+    }
+    if (!("description" in topic)) {
+      topic.description = "";
+      topicChanged = true;
+    }
+    if (!("outcome" in topic)) {
+      topic.outcome = "";
+      topicChanged = true;
+    }
+    if (!("benefits" in topic)) {
+      topic.benefits = "";
+      topicChanged = true;
+    }
+    if (!("targetAudience" in topic)) {
+      topic.targetAudience = "";
+      topicChanged = true;
+    }
     if (!topic.createdAt) {
       topic.createdAt = topic.updatedAt || nowIso();
       topicChanged = true;
@@ -2247,6 +2331,10 @@ function ensureTopic(name) {
     startDate: "",
     endDate: "",
     color: DEFAULT_PROJECT_COLOR,
+    description: "",
+    outcome: "",
+    benefits: "",
+    targetAudience: "",
     createdAt: now,
     updatedAt: now
   };
@@ -2726,6 +2814,13 @@ function renderGroups() {
 
   list.innerHTML = groups.map(g => {
     const members = (g.memberIds || []).map(pid => getPerson(pid)?.name).filter(Boolean);
+    const isExpanded = expandedGroupIds.has(g.id);
+    const memberOptions = people.length
+      ? people.map(p => {
+        const selected = (g.memberIds || []).includes(p.id) ? "selected" : "";
+        return `<option value="${escapeHtml(p.id)}" ${selected}>${escapeHtml(p.name)}</option>`;
+      }).join("")
+      : `<option value="" disabled>No people available</option>`;
     return `
       <div class="item">
         <div class="item__top">
@@ -2736,42 +2831,50 @@ function renderGroups() {
           <div class="badges"><span class="badge">${escapeHtml(g.id)}</span></div>
         </div>
 
-        <div class="picker" style="margin-top:10px">
-          <div class="pickcol">
-            <h4>Members</h4>
-            <div class="picklist">
-              ${people.map(p => {
-                const checked = (g.memberIds || []).includes(p.id) ? "checked" : "";
-                return `
-                  <label class="checkline">
-                    <input type="checkbox" data-group="${escapeHtml(g.id)}" data-member="${escapeHtml(p.id)}" ${checked} />
-                    ${escapeHtml(p.name)}
-                  </label>
-                `;
-              }).join("")}
+        ${isExpanded ? `
+          <div class="picker" style="margin-top:10px">
+            <div class="pickcol">
+              <h4>Members</h4>
+              <div class="muted">Select multiple people to update group membership.</div>
+              <select class="multi-select" multiple size="5" data-group-members="${escapeHtml(g.id)}">
+                ${memberOptions}
+              </select>
             </div>
           </div>
-        </div>
+        ` : ""}
 
         <div class="item__actions">
+          <button class="smallbtn" data-group-toggle="${escapeHtml(g.id)}" aria-expanded="${isExpanded ? "true" : "false"}">
+            ${isExpanded ? "Hide members" : "Show members"}
+          </button>
           <button class="smallbtn smallbtn--danger" data-del-group="${escapeHtml(g.id)}">Delete group</button>
         </div>
       </div>
     `;
   }).join("");
 
-  list.querySelectorAll("input[type=checkbox][data-group]").forEach(cb => {
-    cb.addEventListener("change", async () => {
-      const gid = cb.getAttribute("data-group");
-      const pid = cb.getAttribute("data-member");
+  list.querySelectorAll("[data-group-toggle]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const gid = btn.getAttribute("data-group-toggle");
+      if (!gid) return;
+      if (expandedGroupIds.has(gid)) {
+        expandedGroupIds.delete(gid);
+      } else {
+        expandedGroupIds.add(gid);
+      }
+      renderGroups();
+    });
+  });
+
+  list.querySelectorAll("select[data-group-members]").forEach(select => {
+    select.addEventListener("change", async () => {
+      const gid = select.getAttribute("data-group-members");
       const g = getGroup(gid);
       if (!g) return;
-      g.memberIds = g.memberIds || [];
-      if (cb.checked) {
-        if (!g.memberIds.includes(pid)) g.memberIds.push(pid);
-      } else {
-        g.memberIds = g.memberIds.filter(x => x !== pid);
-      }
+      const selectedIds = Array.from(select.selectedOptions)
+        .map(option => option.value)
+        .filter(Boolean);
+      g.memberIds = selectedIds;
       g.updatedAt = nowIso();
       markDirty();
       await saveLocal();
@@ -3744,7 +3847,11 @@ function readProjectDetailsForm() {
     ownerId: byId("project_owner")?.value || "",
     startDate: byId("project_start")?.value || "",
     endDate: byId("project_end")?.value || "",
-    color: byId("project_color")?.value || DEFAULT_PROJECT_COLOR,
+    color: readProjectColorChoice("project_color_choice", DEFAULT_PROJECT_COLOR),
+    description: byId("project_description")?.value || "",
+    outcome: byId("project_outcome")?.value || "",
+    benefits: byId("project_benefits")?.value || "",
+    targetAudience: byId("project_target_audience")?.value || "",
   };
 }
 
@@ -3762,6 +3869,58 @@ function setProjectDetailsError(message) {
   }
   errorEl.textContent = message;
   errorEl.hidden = false;
+}
+
+/**
+ * Updates the project delete confirmation modal content and error state.
+ * @param {string} message Body copy for the confirmation modal.
+ * @param {string} error Optional error message.
+ */
+function setProjectDeleteModalState(message, error = "") {
+  const messageEl = byId("project_delete_message");
+  const errorEl = byId("project_delete_error");
+  if (messageEl) messageEl.textContent = message;
+  if (errorEl) {
+    errorEl.textContent = error;
+    errorEl.hidden = !error;
+  }
+}
+
+/**
+ * Opens the project deletion lightbox for the currently selected project.
+ */
+function openProjectDeleteLightbox() {
+  if (!projectViewId) return;
+  const project = getTopic(projectViewId);
+  if (!project) return;
+  projectDeleteId = project.id;
+  setProjectDeleteModalState(
+    `Delete "${project.name}"? Meetings and updates will keep their history, but this project will be removed from lists.`
+  );
+  openLightbox("project_delete_lightbox");
+}
+
+/**
+ * Confirms deletion of the selected project and persists changes.
+ */
+async function confirmProjectDelete() {
+  if (!projectDeleteId) return;
+  const project = getTopic(projectDeleteId);
+  if (!project) {
+    setProjectDeleteModalState("Project no longer exists.", "Unable to find the project to delete.");
+    return;
+  }
+  project.deleted = true;
+  project.updatedAt = nowIso();
+  if (projectViewId === projectDeleteId) {
+    projectViewId = "";
+    projectEditorState = { projectId: null, draft: null, error: "" };
+  }
+  projectDeleteId = null;
+  markDirty();
+  await saveLocal();
+  closeLightbox("project_delete_lightbox");
+  renderAll();
 }
 
 /**
@@ -3788,10 +3947,12 @@ function renderProjectsModule() {
   const project = projectViewId ? getTopic(projectViewId) : null;
   const saveBtn = byId("project_save_btn");
   const resetBtn = byId("project_reset_btn");
+  const deleteBtn = byId("project_delete_btn");
 
   if (!project) {
     if (saveBtn) saveBtn.disabled = true;
     if (resetBtn) resetBtn.disabled = true;
+    if (deleteBtn) deleteBtn.disabled = true;
     summary.textContent = "Choose a project to view details.";
     form.innerHTML = `<div class="muted">Select a project to edit its details.</div>`;
     timeline.innerHTML = `<div class="muted">No project selected.</div>`;
@@ -3807,6 +3968,7 @@ function renderProjectsModule() {
 
   if (saveBtn) saveBtn.disabled = false;
   if (resetBtn) resetBtn.disabled = false;
+  if (deleteBtn) deleteBtn.disabled = false;
 
   const owner = project.ownerId ? getPerson(project.ownerId) : null;
   const summaryBits = [
@@ -3826,11 +3988,12 @@ function renderProjectsModule() {
       <label>Owner ${fieldTag(true)}</label>
       <select id="project_owner"></select>
     </div>
+    <div class="formrow">
+      <label>Project color</label>
+      <div id="project_color_picker" class="color-picker" role="radiogroup" aria-label="Project color options"></div>
+      <input id="project_color" type="hidden" value="${escapeHtml(draft.color || DEFAULT_PROJECT_COLOR)}" />
+    </div>
     <div class="grid2">
-      <div class="formrow">
-        <label>Project color</label>
-        <input id="project_color" type="color" value="${escapeHtml(draft.color || DEFAULT_PROJECT_COLOR)}" />
-      </div>
       <div class="formrow">
         <label>Start date</label>
         <input id="project_start" type="date" value="${escapeHtml(draft.startDate)}" />
@@ -3839,6 +4002,22 @@ function renderProjectsModule() {
         <label>End date</label>
         <input id="project_end" type="date" value="${escapeHtml(draft.endDate)}" />
       </div>
+    </div>
+    <div class="formrow">
+      <label>Description</label>
+      <textarea id="project_description" rows="3" placeholder="Summarise what this project delivers.">${escapeHtml(draft.description)}</textarea>
+    </div>
+    <div class="formrow">
+      <label>Outcome</label>
+      <textarea id="project_outcome" rows="2" placeholder="State the desired outcome.">${escapeHtml(draft.outcome)}</textarea>
+    </div>
+    <div class="formrow">
+      <label>Benefits</label>
+      <textarea id="project_benefits" rows="2" placeholder="Highlight key benefits.">${escapeHtml(draft.benefits)}</textarea>
+    </div>
+    <div class="formrow">
+      <label>Target audience</label>
+      <textarea id="project_target_audience" rows="2" placeholder="Who is this for?">${escapeHtml(draft.targetAudience)}</textarea>
     </div>
   `;
 
@@ -3853,6 +4032,9 @@ function renderProjectsModule() {
     ownerSelect.value = draft.ownerId || "";
   }
 
+  // Render the preset color picker after the form exists in the DOM.
+  renderProjectColorPicker("project_color_picker", "project_color_choice", draft.color);
+
   setProjectDetailsError(projectEditorState.error);
 
   const syncDraftFromForm = () => {
@@ -3862,9 +4044,22 @@ function renderProjectsModule() {
 
   byId("project_name")?.addEventListener("input", syncDraftFromForm);
   byId("project_owner")?.addEventListener("change", syncDraftFromForm);
-  byId("project_color")?.addEventListener("input", syncDraftFromForm);
   byId("project_start")?.addEventListener("change", syncDraftFromForm);
   byId("project_end")?.addEventListener("change", syncDraftFromForm);
+  byId("project_description")?.addEventListener("input", syncDraftFromForm);
+  byId("project_outcome")?.addEventListener("input", syncDraftFromForm);
+  byId("project_benefits")?.addEventListener("input", syncDraftFromForm);
+  byId("project_target_audience")?.addEventListener("input", syncDraftFromForm);
+
+  form.querySelectorAll('input[name="project_color_choice"]').forEach(input => {
+    input.addEventListener("change", () => {
+      const hiddenInput = byId("project_color");
+      if (hiddenInput) {
+        hiddenInput.value = readProjectColorChoice("project_color_choice", draft.color);
+      }
+      syncDraftFromForm();
+    });
+  });
 
   const actionItems = alive(db.items)
     .filter(it => it.topicId === project.id && it.section === "action")
@@ -4596,8 +4791,25 @@ function openMeetingEditLightbox(meetingId) {
 function openTopicLightbox() {
   const input = byId("topic_name_input");
   const colorInput = byId("topic_color_input");
+  const descriptionInput = byId("topic_description_input");
+  const outcomeInput = byId("topic_outcome_input");
+  const benefitsInput = byId("topic_benefits_input");
+  const audienceInput = byId("topic_audience_input");
   if (input) input.value = "";
   if (colorInput) colorInput.value = DEFAULT_PROJECT_COLOR;
+  if (descriptionInput) descriptionInput.value = "";
+  if (outcomeInput) outcomeInput.value = "";
+  if (benefitsInput) benefitsInput.value = "";
+  if (audienceInput) audienceInput.value = "";
+  // Render the project color presets for the creation flow.
+  renderProjectColorPicker("topic_color_picker", "topic_color_choice", DEFAULT_PROJECT_COLOR);
+  byId("topic_color_picker")?.querySelectorAll('input[name="topic_color_choice"]').forEach(inputEl => {
+    inputEl.addEventListener("change", () => {
+      if (colorInput) {
+        colorInput.value = readProjectColorChoice("topic_color_choice", DEFAULT_PROJECT_COLOR);
+      }
+    });
+  });
   setLightboxError("topic_lightbox_error", "");
   openLightbox("topic_lightbox", "topic_name_input");
 }
@@ -4742,7 +4954,11 @@ function openUpdateLightbox() {
  */
 async function addTopicFromLightbox() {
   const name = byId("topic_name_input")?.value.trim() || "";
-  const colorInput = byId("topic_color_input")?.value || "";
+  const colorInput = readProjectColorChoice("topic_color_choice", DEFAULT_PROJECT_COLOR);
+  const description = byId("topic_description_input")?.value || "";
+  const outcome = byId("topic_outcome_input")?.value || "";
+  const benefits = byId("topic_benefits_input")?.value || "";
+  const targetAudience = byId("topic_audience_input")?.value || "";
   if (!name) {
     setLightboxError("topic_lightbox_error", "Project name is required.");
     return;
@@ -4751,7 +4967,11 @@ async function addTopicFromLightbox() {
   const topicId = ensureTopic(name);
   const topic = getTopic(topicId);
   if (topic) {
-    topic.color = normalizeHexColor(colorInput);
+    topic.color = normalizeProjectColorSelection(colorInput);
+    topic.description = description;
+    topic.outcome = outcome;
+    topic.benefits = benefits;
+    topic.targetAudience = targetAudience;
     topic.updatedAt = nowIso();
   }
   markDirty();
@@ -4788,7 +5008,11 @@ async function saveProjectDetails() {
   project.ownerId = draft.ownerId || "";
   project.startDate = draft.startDate;
   project.endDate = draft.endDate;
-  project.color = normalizeHexColor(draft.color);
+  project.color = normalizeProjectColorSelection(draft.color);
+  project.description = draft.description;
+  project.outcome = draft.outcome;
+  project.benefits = draft.benefits;
+  project.targetAudience = draft.targetAudience;
   project.updatedAt = nowIso();
 
   projectEditorState = { projectId: project.id, draft: createProjectDraft(project), error: "" };
@@ -5282,13 +5506,17 @@ function wireLightboxControls() {
     "update_lightbox",
     "topic_lightbox",
     "person_lightbox",
-    "group_lightbox"
+    "group_lightbox",
+    "project_delete_lightbox"
   ];
 
   lightboxIds.forEach((id) => {
     byId(id)?.addEventListener("click", (event) => {
       if (event.target?.matches("[data-lightbox-close]")) {
         closeLightbox(id);
+        if (id === "project_delete_lightbox") {
+          projectDeleteId = null;
+        }
       }
     });
   });
@@ -5421,6 +5649,8 @@ function wireProjectControls() {
   byId("project_module_new_btn")?.addEventListener("click", openTopicLightbox);
   byId("project_save_btn")?.addEventListener("click", saveProjectDetails);
   byId("project_reset_btn")?.addEventListener("click", resetProjectDetails);
+  byId("project_delete_btn")?.addEventListener("click", openProjectDeleteLightbox);
+  byId("project_delete_confirm_btn")?.addEventListener("click", confirmProjectDelete);
 }
 
 function wireSearchControls() {
