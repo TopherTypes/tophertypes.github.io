@@ -362,6 +362,13 @@ label{
   min-height:60px;
 }
 
+/* Scrollable list variant sized to show ~5 people cards before scrolling. */
+.list--scroll-people{
+  max-height:360px;
+  overflow-y:auto;
+  padding-right:6px;
+}
+
 /* Compact list variant to reduce vertical footprint for dense panels. */
 .list--compact{
   gap:8px;
@@ -412,6 +419,43 @@ label{
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap:12px;
   margin-bottom:12px;
+}
+
+/* Project color picker for preset swatches. */
+.color-picker{
+  display:grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap:10px;
+}
+
+.color-option{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:8px 10px;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background: rgba(7,9,15,0.55);
+  cursor:pointer;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.color-option:hover{
+  border-color: rgba(124,155,255,0.4);
+  transform: translateY(-1px);
+}
+
+.color-option input{
+  margin:0;
+}
+
+.color-swatch{
+  width:16px;
+  height:16px;
+  border-radius:50%;
+  background: var(--swatch, var(--accent));
+  border:1px solid rgba(255,255,255,0.3);
+  box-shadow: 0 0 0 2px rgba(7,9,15,0.6) inset;
 }
 
 /* Item cards */
@@ -995,6 +1039,21 @@ label{
 }
 .pickcol h4{margin:0 0 8px 0; font-size:13px; color: var(--text);}
 .picklist{display:flex; flex-direction:column; gap:6px;}
+
+/* Multi-select used for group membership management. */
+.multi-select{
+  width:100%;
+  min-height:150px;
+  padding:8px;
+  border-radius:12px;
+  border:1px solid var(--border);
+  background: rgba(7,9,15,0.55);
+  color: var(--text);
+}
+
+.multi-select option{
+  padding:4px 6px;
+}
 .checkline{
   display:flex;
   gap:8px;

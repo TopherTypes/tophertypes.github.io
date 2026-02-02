@@ -346,6 +346,7 @@
           <div class="row row--space">
             <h2>Project details</h2>
             <div class="row">
+              <button class="btn btn--danger" id="project_delete_btn" type="button">Delete project</button>
               <button class="btn btn--ghost" id="project_reset_btn" type="button">Reset</button>
               <button class="btn btn--primary" id="project_save_btn" type="button">Save details</button>
             </div>
@@ -384,7 +385,7 @@
             <h2>People</h2>
             <button class="btn btn--primary" id="person_new_btn">New person</button>
           </div>
-          <div id="people_list" class="list"></div>
+          <div id="people_list" class="list list--scroll-people"></div>
         </div>
 
         <div class="card">
@@ -713,11 +714,45 @@
       </div>
       <div class="formrow">
         <label>Project color</label>
-        <input id="topic_color_input" type="color" />
+        <div id="topic_color_picker" class="color-picker" role="radiogroup" aria-label="Project color options"></div>
+        <input id="topic_color_input" type="hidden" />
+      </div>
+      <div class="formrow">
+        <label>Description</label>
+        <textarea id="topic_description_input" rows="3" placeholder="Summarise what this project delivers."></textarea>
+      </div>
+      <div class="formrow">
+        <label>Outcome</label>
+        <textarea id="topic_outcome_input" rows="2" placeholder="State the desired outcome."></textarea>
+      </div>
+      <div class="formrow">
+        <label>Benefits</label>
+        <textarea id="topic_benefits_input" rows="2" placeholder="Highlight key benefits."></textarea>
+      </div>
+      <div class="formrow">
+        <label>Target audience</label>
+        <textarea id="topic_audience_input" rows="2" placeholder="Who is this for?"></textarea>
       </div>
       <div class="item__error" id="topic_lightbox_error" hidden></div>
       <div class="row row--space">
         <button class="btn btn--primary" id="topic_add_btn">Add project</button>
+        <button class="btn btn--ghost" data-lightbox-close="true" type="button">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Project deletion confirmation lightbox -->
+  <div class="lightbox" id="project_delete_lightbox" aria-hidden="true">
+    <div class="lightbox__backdrop" data-lightbox-close="true"></div>
+    <div class="lightbox__panel" role="dialog" aria-modal="true" aria-labelledby="project_delete_title">
+      <div class="lightbox__header">
+        <h3 id="project_delete_title">Delete project</h3>
+        <button class="iconbtn" data-lightbox-close="true" aria-label="Close delete project modal">✕</button>
+      </div>
+      <p class="muted" id="project_delete_message">Delete this project?</p>
+      <div class="item__error" id="project_delete_error" hidden></div>
+      <div class="row row--space">
+        <button class="btn btn--danger" id="project_delete_confirm_btn" type="button">Delete project</button>
         <button class="btn btn--ghost" data-lightbox-close="true" type="button">Cancel</button>
       </div>
     </div>
